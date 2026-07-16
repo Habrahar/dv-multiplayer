@@ -11,8 +11,12 @@ public static class CareerManagerLicensePayingScreenPatch
     {
         if (input != InputAction.Confirm || NetworkLifecycle.Instance.IsHost())
             return true;
+
+        // The purchase did not go through locally, most often because the player cannot
+        // afford it. Hand back to the vanilla handler so it runs its own rejection flow;
+        // swallowing this leaves the screen frozen with no feedback at all.
         if (!__instance.cashReg.Buy())
-            return false;
+            return true;
 
         if (__instance.IsJobLicense)
             NetworkLifecycle.Instance.Client.SendLicensePurchaseRequest(__instance.jobLicenseToBuy.id, __instance.IsJobLicense);

@@ -20,7 +20,6 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
         base.Awake();
         if (!NetworkLifecycle.Instance.IsHost())
             return;
-        Inventory.Instance.MoneyChanged += Server_OnMoneyChanged;
         LicenseManager.Instance.LicenseAcquired += Server_OnLicenseAcquired;
         LicenseManager.Instance.JobLicenseAcquired += Server_OnJobLicenseAcquired;
         LicenseManager.Instance.GarageUnlocked += Server_OnGarageUnlocked;
@@ -33,18 +32,12 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
             return;
         if (!NetworkLifecycle.Instance.IsHost())
             return;
-        Inventory.Instance.MoneyChanged -= Server_OnMoneyChanged;
         LicenseManager.Instance.LicenseAcquired -= Server_OnLicenseAcquired;
         LicenseManager.Instance.JobLicenseAcquired -= Server_OnJobLicenseAcquired;
         LicenseManager.Instance.GarageUnlocked -= Server_OnGarageUnlocked;
     }
 
     #region Server
-
-    private static void Server_OnMoneyChanged(double oldAmount, double newAmount)
-    {
-        NetworkLifecycle.Instance.Server.SendMoney((float)newAmount);
-    }
 
     private static void Server_OnLicenseAcquired(GeneralLicenseType_v2 license)
     {
@@ -74,6 +67,7 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
             JObject playerData = [];
             playerData.SetVector3(SaveGameKeys.Player_position, player.AbsoluteWorldPosition);
             playerData.SetFloat(SaveGameKeys.Player_rotation, player.WorldRotationY);
+            playerData.SetFloat(SaveGameKeys.Player_money, (float)player.Money);
             //store inventory see StorageSerializer.SaveStorage()
             players.SetJObject(player.Guid.ToString(), playerData);
         }

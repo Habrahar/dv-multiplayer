@@ -136,6 +136,25 @@ public static class DvExtensions
         return result;
     }
 
+    public static ServerPlayer GetClosestPlayer(this Vector3 anchor)
+    {
+        ServerPlayer closest = null;
+        float bestSqDist = float.MaxValue;
+
+        foreach (ServerPlayer serverPlayer in NetworkLifecycle.Instance.Server.ServerPlayers)
+        {
+            float sqDist = (serverPlayer.WorldPosition - anchor).sqrMagnitude;
+
+            if (sqDist >= bestSqDist)
+                continue;
+
+            bestSqDist = sqDist;
+            closest = serverPlayer;
+        }
+
+        return closest;
+    }
+
     public static bool PlayerCanReach(this GameObject item, ServerPlayer player, float extraRange = 0f)
     {
         return PlayerCanReach (item.transform, player, extraRange);

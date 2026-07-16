@@ -3,6 +3,7 @@ using DV.InventorySystem;
 using HarmonyLib;
 using Multiplayer.Components.Networking;
 using Multiplayer.Components.Networking.World;
+using Multiplayer.Networking.Data;
 using Multiplayer.Utils;
 using System;
 using System.Collections.Generic;
@@ -34,7 +35,22 @@ public class CashRegisterBasePatch
         if (netCashRegister.IsShopRegister)
             return true;
 
-        Inventory.Instance.AddMoney(amount);
+        // Vanilla gives us no submitter, so the payout goes to whoever is standing at
+        // the register. That is the player who handed the job in for every realistic
+        // case, but it is proximity, not ownership: with two players at one register the
+        // nearest one is paid. Proper attribution needs the job owner, which lives in
+        // feature/sync-jobs.
+        ServerPlayer earner = __instance.transform.position.GetClosestPlayer();
+
+        if (earner == null)
+        {
+            Multiplayer.LogWarning($"AddCash found no player to credit for {cashRegisterWithModules.GetObjectPath()}; paying the host instead");
+            Inventory.Instance.AddMoney(amount);
+        }
+        else
+        {
+            earner.AddMoney(amount);
+        }
 
         CoroutineManager.Instance.StartCoroutine(netCashRegister.AddCash(amount));
 

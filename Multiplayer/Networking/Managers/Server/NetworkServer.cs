@@ -769,17 +769,21 @@ public class NetworkServer : NetworkManager
         );
     }
 
-    public void SendMoney(float amount)
+    // Balances are personal, so this is addressed to the one player it belongs to.
+    // The host reads its balance straight from its own Inventory and needs no packet.
+    public void SendMoney(ServerPlayer player)
     {
-        SendPacketToAll
+        if (player == null || player.IsHost || player.LoadingState < PlayerLoadingState.ReadyForWorldState)
+            return;
+
+        SendPacket
         (
+            player.Peer,
             new ClientboundMoneyPacket
             {
-                Amount = amount
+                Amount = (float)player.Money
             },
-            DeliveryMethod.ReliableUnordered,
-            PlayerLoadingState.ReadyForWorldState,
-            excludeSelf: true
+            DeliveryMethod.ReliableUnordered
         );
     }
 
@@ -1697,7 +1701,7 @@ public class NetworkServer : NetworkManager
 
         TrainCar trainCar = networkedTrainCar.TrainCar;
         float cost = trainCar.playerSpawnedCar ? 0.0f : Mathf.RoundToInt(Globals.G.GameParams.DeleteCarMaxPrice);
-        if (!Inventory.Instance.RemoveMoney(cost))
+        if (!player.RemoveMoney(cost))
         {
             LogWarning($"{player.Username} tried to delete a train without enough money to do so!");
             return;
@@ -1742,7 +1746,7 @@ public class NetworkServer : NetworkManager
         float cost = TutorialHelper.InRestrictedMode || rerailController != null && rerailController.isPlayerNewbie ? 0f :
             RerailController.CalculatePrice((networkedTrainCar.transform.position - position).magnitude, trainCar.carType, Globals.G.GameParams.RerailMaxPrice);
 
-        if (!Inventory.Instance.RemoveMoney(cost))
+        if (!player.RemoveMoney(cost))
         {
             LogWarning($"{player.Username} tried to rerail a train without enough money to do so!");
             return;
@@ -1831,7 +1835,7 @@ public class NetworkServer : NetworkManager
         if (isGarageCar)
         {
             var price = Mathf.Min(selectedGarageSpawner.garageType.summonPrice, Globals.G.GameParams.WorkTrainSummonMaxPrice);
-            if (!Inventory.Instance.RemoveMoney(price))
+            if (!player.RemoveMoney(price))
             {
                 LogWarning($"{player.Username} tried to request a work train without enough money to do so!");
                 rpcResponse.Response = SpawnResponse.ResponseType.InsufficientFunds;
@@ -1966,7 +1970,7 @@ public class NetworkServer : NetworkManager
             return;
         }
 
-        if (!Inventory.Instance.RemoveMoney(price.Value))
+        if (!player.RemoveMoney(price.Value))
         {
             LogWarning($"{player.Username} tried to purchase a {(packet.IsJobLicense ? "job" : "general")} license with id {packet.Id} without enough money to do so!");
             return;

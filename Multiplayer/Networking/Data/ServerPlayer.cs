@@ -1,3 +1,4 @@
+using DV.InventorySystem;
 using DV.JObjectExtstensions;
 using Multiplayer.Components.Networking;
 using Multiplayer.Components.Networking.Train;
@@ -17,6 +18,7 @@ namespace Multiplayer.Networking.Data;
 public class ServerPlayer : IDisposable
 {
     public const byte MAX_CREW_NAME_LENGTH = 6;
+    public const float STARTING_MONEY = 1000f;
     #region ID Management
     private static readonly IdPool<byte> idPool = new();
 
@@ -194,6 +196,64 @@ public class ServerPlayer : IDisposable
     public float WorldRotationY => CarId == 0 || !NetworkedTrainCar.TryGet(CarId, out NetworkedTrainCar car)
         ? RawRotationY
         : (Quaternion.Euler(0, RawRotationY, 0) * car.transform.rotation).eulerAngles.y;
+    #endregion
+
+    #region Wallet
+    // The host's wallet is its own Inventory, which the vanilla save owns. Remote
+    // players are backed by _money and persisted per Guid by NetworkedSaveGameManager,
+    // which skips the host for exactly that reason.
+    public bool IsHost => Peer == NetworkLifecycle.Instance.Server.SelfPeer;
+
+    private double _money;
+
+    public double Money => IsHost ? Inventory.Instance.PlayerMoney : _money;
+
+    public void AddMoney(double amount)
+    {
+        if (amount <= 0d)
+            return;
+
+        if (IsHost)
+        {
+            Inventory.Instance.AddMoney(amount);
+            return;
+        }
+
+        SetMoneyInternal(_money + amount);
+    }
+
+    public bool RemoveMoney(double amount)
+    {
+        if (amount <= 0d)
+            return true;
+
+        if (IsHost)
+            return Inventory.Instance.RemoveMoney(amount);
+
+        if (_money < amount)
+            return false;
+
+        SetMoneyInternal(_money - amount);
+        return true;
+    }
+
+    // Used on join and by the save loader, where the balance is restored rather than earned.
+    public void SetMoney(double amount)
+    {
+        if (IsHost)
+        {
+            Inventory.Instance.SetMoney(Math.Max(0d, amount));
+            return;
+        }
+
+        SetMoneyInternal(amount);
+    }
+
+    private void SetMoneyInternal(double value)
+    {
+        _money = Math.Max(0d, value);
+        NetworkLifecycle.Instance.Server.SendMoney(this);
+    }
     #endregion
 
     #region Item Ownership

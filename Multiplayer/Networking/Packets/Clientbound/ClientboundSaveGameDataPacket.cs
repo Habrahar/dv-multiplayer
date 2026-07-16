@@ -51,6 +51,12 @@ public class ClientboundSaveGameDataPacket
 
         JObject playerData = NetworkedSaveGameManager.Instance.Server_GetPlayerData(data, player.Guid);
 
+        // Restore the player's own balance before it goes out in the packet below.
+        // The host is skipped: it has no saved player data, and its wallet is the
+        // local Inventory, which the vanilla save has already restored.
+        if (!player.IsHost)
+            player.SetMoney(playerData?.GetFloat(SaveGameKeys.Player_money) ?? ServerPlayer.STARTING_MONEY);
+
         Multiplayer.LogDebug(() =>
         {
             string unlockedGen = string.Join(", ", UnlockablesManager.Instance.UnlockedGeneralLicenses);
@@ -89,7 +95,7 @@ public class ClientboundSaveGameDataPacket
         {
             GameMode = data.GetString(SaveGameKeys.Game_mode),
             SerializedDifficulty = difficulty.ToString(Formatting.None),
-            Money = StartingItemsController.Instance == null || !StartingItemsController.Instance.itemsLoaded ? data.GetFloat(SaveGameKeys.Player_money).GetValueOrDefault(0) : (float)Inventory.Instance.PlayerMoney,
+            Money = (float)player.Money,
             AcquiredGeneralLicenses = data.GetStringArray(SaveGameKeys.Licenses_General),
             AcquiredJobLicenses = data.GetStringArray(SaveGameKeys.Licenses_Jobs),
             UnlockedGarages = data.GetStringArray(SaveGameKeys.Garages),

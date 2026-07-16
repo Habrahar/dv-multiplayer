@@ -159,7 +159,7 @@ public class NetworkedCashRegisterWithModules : IdMonoBehaviour<ushort, Networke
 
                 case CashRegisterAction.Buy:
 
-                    Multiplayer.LogDebug(() => $"NetworkedCashRegisterWithModules.Server_ProcessAction({packet.Action}) Player Money: {Inventory.Instance.PlayerMoney}, TotalCost: {CashRegister.GetTotalCost()}, TotalUnitsInBasket: {CashRegister.TotalUnitsInBasket()}");
+                    Multiplayer.LogDebug(() => $"NetworkedCashRegisterWithModules.Server_ProcessAction({packet.Action}) Player Money: {player.Money}, TotalCost: {CashRegister.GetTotalCost()}, TotalUnitsInBasket: {CashRegister.TotalUnitsInBasket()}");
 
                     if (CashRegister.TotalUnitsInBasket() <= 0)
                     {
@@ -174,7 +174,7 @@ public class NetworkedCashRegisterWithModules : IdMonoBehaviour<ushort, Networke
                         success = CashRegister?.Buy() ?? false;
                     }
 
-                    Multiplayer.LogDebug(() => $"NetworkedCashRegisterWithModules.Server_ProcessAction({packet.Action}, {packet.Amount}) Response: {response}, Buy success: {success}, Player Money: {Inventory.Instance.PlayerMoney}, TotalCost: {CashRegister.GetTotalCost()}, TotalUnitsInBasket: {CashRegister.TotalUnitsInBasket()}");
+                    Multiplayer.LogDebug(() => $"NetworkedCashRegisterWithModules.Server_ProcessAction({packet.Action}, {packet.Amount}) Response: {response}, Buy success: {success}, Player Money: {player.Money}, TotalCost: {CashRegister.GetTotalCost()}, TotalUnitsInBasket: {CashRegister.TotalUnitsInBasket()}");
 
                     break;
 
@@ -197,12 +197,12 @@ public class NetworkedCashRegisterWithModules : IdMonoBehaviour<ushort, Networke
                     }
                     else
                     {
-                        double amountToAdd = Math.Min(remainingCost, Inventory.Instance.PlayerMoney);
+                        double amountToAdd = Math.Min(remainingCost, player.Money);
 
-                        Inventory.Instance.RemoveMoney(amountToAdd);
+                        player.RemoveMoney(amountToAdd);
                         CashRegister.SetCash(CashRegister.DepositedCash + amountToAdd);
 
-                        NetworkLifecycle.Instance.Server?.LogDebug(() => $"NetworkedCashRegisterWithModules.Server_ProcessAction({packet.Action}) Added cash: {amountToAdd}, New DepositedCash: {CashRegister.DepositedCash}, Player Money: {Inventory.Instance.PlayerMoney}");
+                        NetworkLifecycle.Instance.Server?.LogDebug(() => $"NetworkedCashRegisterWithModules.Server_ProcessAction({packet.Action}) Added cash: {amountToAdd}, New DepositedCash: {CashRegister.DepositedCash}, Player Money: {player.Money}");
                         packet.Action = CashRegisterAction.SetFunds;
                         packet.Amount = CashRegister.DepositedCash;
                         success = true;
