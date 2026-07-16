@@ -3,7 +3,7 @@
         <TargetFramework>net48</TargetFramework>
         <LangVersion>latest</LangVersion>
         <RootNamespace>Multiplayer</RootNamespace>
-        <InformationalVersion>0.1.15.3</InformationalVersion>
+        <InformationalVersion>0.1.15.4</InformationalVersion>
     </PropertyGroup>
     <ItemGroup>
         <PackageReference Include="Krafs.Publicizer" Version="2.3.0">
@@ -115,15 +115,15 @@
     </Target>
     <Target Name="PostBuild" AfterTargets="PostBuildEvent" DependsOnTargets="PostBuildMacros">
         <!-- Sign Assemblies if in 'Release' -->
-        <Exec Condition="$(ConfigurationName) == 'Release' AND $(Cert-Thumb) != ''" Command="&quot;$(SignToolPath)SignTool.exe&quot; sign /sha1 $(Cert-Thumb) /fd SHA256 /t http://timestamp.sectigo.com &quot;$(TargetPath)&quot; &quot;$(OutDir)/LiteNetLib.dll&quot;" />
+        <Exec Condition="$(Configuration) == 'Release' AND $(Cert-Thumb) != ''" Command="&quot;$(SignToolPath)SignTool.exe&quot; sign /sha1 $(Cert-Thumb) /fd SHA256 /t http://timestamp.sectigo.com &quot;$(TargetPath)&quot; &quot;$(OutDir)/LiteNetLib.dll&quot;" />
         <!-- Copy to build folder -->
         <Copy SourceFiles="../info.json;../locale.csv;../LICENSE;$(TargetPath);$(OutDir)/Humanizer.dll;$(OutDir)/LiteNetLib.dll" DestinationFolder="../build/" />
         <!-- Update Json, copy to game directory and make package if in 'Release' -->
         <!-- Windows: use powershell -->
-        <Exec Condition="$(ConfigurationName) == 'Release' AND $([MSBuild]::IsOsPlatform('Windows'))" Command="powershell -executionpolicy bypass -Command &quot;(../post-build.ps1 -Ver '@(VersionNumber)' -Target '$(TargetPath)' -GameDir '$(DvInstallDir)\Mods\Multiplayer')&quot;" />
-        <Exec Condition="$(ConfigurationName) == 'Debug' AND $([MSBuild]::IsOsPlatform('Windows'))" Command="powershell -executionpolicy bypass -Command &quot;(../post-build.ps1 -Ver '@(VersionNumber)' -NoArchive -Target '$(TargetPath)' -GameDir '$(DvInstallDir)\Mods\Multiplayer')&quot;" />
+        <Exec Condition="$(Configuration) == 'Release' AND $([MSBuild]::IsOsPlatform('Windows'))" Command="powershell -executionpolicy bypass -Command &quot;(../post-build.ps1 -Ver '@(VersionNumber)' -Target '$(TargetPath)' -GameDir '$(DvInstallDir)\Mods\Multiplayer')&quot;" />
+        <Exec Condition="$(Configuration) == 'Debug' AND $([MSBuild]::IsOsPlatform('Windows'))" Command="powershell -executionpolicy bypass -Command &quot;(../post-build.ps1 -Ver '@(VersionNumber)' -NoArchive -Target '$(TargetPath)' -GameDir '$(DvInstallDir)\Mods\Multiplayer')&quot;" />
         <!-- Linux/macOS: use pwsh -->
-        <Exec Condition="$(ConfigurationName) == 'Release' AND !$([MSBuild]::IsOsPlatform('Windows'))" Command="pwsh -ExecutionPolicy Bypass -Command &quot;(../post-build.ps1 -Ver '@(VersionNumber)' -Target '$(TargetPath)' -GameDir '$(DvInstallDir)/Mods/Multiplayer')&quot;" ContinueOnError="true" />
-        <Exec Condition="$(ConfigurationName) == 'Debug' AND !$([MSBuild]::IsOsPlatform('Windows'))" Command="pwsh -ExecutionPolicy Bypass -Command &quot;(../post-build.ps1 -Ver '@(VersionNumber)' -NoArchive -Target '$(TargetPath)' -GameDir '$(DvInstallDir)/Mods/Multiplayer')&quot;" ContinueOnError="true" />
+        <Exec Condition="$(Configuration) == 'Release' AND !$([MSBuild]::IsOsPlatform('Windows'))" Command="pwsh -ExecutionPolicy Bypass -Command &quot;(../post-build.ps1 -Ver '@(VersionNumber)' -Target '$(TargetPath)' -GameDir '$(DvInstallDir)/Mods/Multiplayer')&quot;" ContinueOnError="true" />
+        <Exec Condition="$(Configuration) == 'Debug' AND !$([MSBuild]::IsOsPlatform('Windows'))" Command="pwsh -ExecutionPolicy Bypass -Command &quot;(../post-build.ps1 -Ver '@(VersionNumber)' -NoArchive -Target '$(TargetPath)' -GameDir '$(DvInstallDir)/Mods/Multiplayer')&quot;" ContinueOnError="true" />
     </Target>
 </Project>

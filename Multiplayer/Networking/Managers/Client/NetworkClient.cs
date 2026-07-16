@@ -1175,8 +1175,13 @@ public class NetworkClient : NetworkManager
         else
             LicenseManager.Instance.AcquireGeneralLicense(Globals.G.Types.generalLicenses.Find(l => l.id == packet.Id));
 
+        // Only the screen a player is actually reading. Licences are still shared, so this
+        // fires on every client whenever anyone buys one, and repopulating a screen that is
+        // switched away paints its rows over whatever that terminal is showing: Disable()
+        // blanked those texts on the way out, and Activate() fills them again on the way in.
         foreach (CareerManagerLicensesScreen screen in Object.FindObjectsOfType<CareerManagerLicensesScreen>())
-            screen.PopulateTextsFromIndex(screen.IndexOfFirstDisplayedEntry); //B99
+            if (ReferenceEquals(screen.screenSwitcher?.CurrentScreen, screen))
+                screen.PopulateTextsFromIndex(screen.IndexOfFirstDisplayedEntry); //B99
     }
 
     private void OnClientboundGarageUnlockPacket(ClientboundGarageUnlockPacket packet)
