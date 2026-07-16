@@ -1960,6 +1960,7 @@ public class NetworkServer : NetworkManager
         if (!price.HasValue)
         {
             LogWarning($"{player.Username} tried to purchase an invalid {(packet.IsJobLicense ? "job" : "general")} license with id {packet.Id}!");
+            DenyLicensePurchase(packet.TicketId, player, peer, LicensePurchaseResponse.ResponseType.UnknownLicense);
             return;
         }
 
@@ -1967,12 +1968,14 @@ public class NetworkServer : NetworkManager
         if (CareerManagerDebtController.Instance.NumberOfNonZeroPricedDebts > 0)
         {
             LogWarning($"{player.Username} tried to purchase a {(packet.IsJobLicense ? "job" : "general")} license with id {packet.Id} while having existing debts!");
+            DenyLicensePurchase(packet.TicketId, player, peer, LicensePurchaseResponse.ResponseType.OutstandingDebts);
             return;
         }
 
         if (!player.RemoveMoney(price.Value))
         {
             LogWarning($"{player.Username} tried to purchase a {(packet.IsJobLicense ? "job" : "general")} license with id {packet.Id} without enough money to do so!");
+            DenyLicensePurchase(packet.TicketId, player, peer, LicensePurchaseResponse.ResponseType.InsufficientFunds);
             return;
         }
 
@@ -1980,6 +1983,17 @@ public class NetworkServer : NetworkManager
             LicenseManager.Instance.AcquireJobLicense(jobLicense);
         else
             LicenseManager.Instance.AcquireGeneralLicense(generalLicense);
+
+        SendRpcResponse(packet.TicketId, new LicensePurchaseResponse { Response = LicensePurchaseResponse.ResponseType.Success }, peer);
+    }
+
+    // The buyer pays into its own career manager register, which is not networked, so the
+    // cash has already left its local wallet by the time we refuse. Send the authoritative
+    // balance along with the refusal, or the client stays short until its next money event.
+    private void DenyLicensePurchase(uint ticketId, ServerPlayer player, ITransportPeer peer, LicensePurchaseResponse.ResponseType reason)
+    {
+        SendRpcResponse(ticketId, new LicensePurchaseResponse { Response = reason }, peer);
+        SendMoney(player);
     }
     private void OnServerboundJobValidateRequestPacket(ServerboundJobValidateRequestPacket packet, ITransportPeer peer)
     {

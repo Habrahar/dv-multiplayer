@@ -259,6 +259,18 @@ public static class Locale
     #region Career Manager
     public static string CAREER_MANAGER__FEES_HOST_ONLY => Get(CAREER_MANAGER__FEES_HOST_ONLY_KEY);
     private const string CAREER_MANAGER__FEES_HOST_ONLY_KEY = $"{PREFIX_CAREER_MANAGER}/fees_host_only";
+
+    public static string CAREER_MANAGER__LICENSE_REFUSED => Get(CAREER_MANAGER__LICENSE_REFUSED_KEY);
+    private const string CAREER_MANAGER__LICENSE_REFUSED_KEY = $"{PREFIX_CAREER_MANAGER}/license_refused";
+
+    public static string CAREER_MANAGER__LICENSE_REFUSED_DEBTS => Get(CAREER_MANAGER__LICENSE_REFUSED_DEBTS_KEY);
+    private const string CAREER_MANAGER__LICENSE_REFUSED_DEBTS_KEY = $"{PREFIX_CAREER_MANAGER}/license_refused_debts";
+
+    public static string CAREER_MANAGER__LICENSE_REFUSED_FUNDS => Get(CAREER_MANAGER__LICENSE_REFUSED_FUNDS_KEY);
+    private const string CAREER_MANAGER__LICENSE_REFUSED_FUNDS_KEY = $"{PREFIX_CAREER_MANAGER}/license_refused_funds";
+
+    public static string CAREER_MANAGER__LICENSE_REFUSED_TIMEOUT => Get(CAREER_MANAGER__LICENSE_REFUSED_TIMEOUT_KEY);
+    private const string CAREER_MANAGER__LICENSE_REFUSED_TIMEOUT_KEY = $"{PREFIX_CAREER_MANAGER}/license_refused_timeout";
     #endregion
 
     #region Player List

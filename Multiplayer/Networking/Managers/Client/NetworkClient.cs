@@ -1806,10 +1806,11 @@ public class NetworkClient : NetworkManager
         }, DeliveryMethod.ReliableUnordered);
     }
 
-    public void SendLicensePurchaseRequest(string id, bool isJobLicense)
+    public void SendLicensePurchaseRequest(uint ticketId, string id, bool isJobLicense)
     {
         SendPacketToServer(new ServerboundLicensePurchaseRequestPacket
         {
+            TicketId = ticketId,
             Id = id,
             IsJobLicense = isJobLicense
         }, DeliveryMethod.ReliableUnordered);
