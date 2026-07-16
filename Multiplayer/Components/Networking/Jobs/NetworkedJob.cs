@@ -129,28 +129,26 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
     private readonly List<NetworkedItem> JobReports = [];
 
     /// <summary>
-    /// Server-side: who took this job, or Guid.Empty while nobody has. A Guid rather than a
-    /// player id so ownership survives the owner disconnecting and coming back with a new id.
+    /// Server-side: whose job this is, kept for saving. Guid.Empty while nobody has taken it.
     /// </summary>
-    public Guid OwnedBy { get; set; } = Guid.Empty;
+    public Guid OwnedBy { get; private set; } = Guid.Empty;
 
     /// <summary>
-    /// The owner's current player id for the wire, or 0 if the job is untaken or its owner is
-    /// away. Clients only ever ask "is this mine?", which a session id answers.
+    /// The owner's player id, which is what goes on the wire: clients only ever ask "is this
+    /// mine?", and a session id answers that. 0 means untaken.
     /// </summary>
-    public byte OwnerId
+    public byte OwnerId { get; private set; }
+
+    /// <summary>
+    /// Named at the moment the job is handed over, rather than looked up later. The Guid comes
+    /// from the player's own settings file, so two installs cloned from one another share it -
+    /// searching the player list for a Guid match then finds whoever joined first and quietly
+    /// hands them someone else's job.
+    /// </summary>
+    public void SetOwner(ServerPlayer player)
     {
-        get
-        {
-            if (OwnedBy == Guid.Empty || !NetworkLifecycle.Instance.IsHost())
-                return 0;
-
-            foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
-                if (player.Guid == OwnedBy)
-                    return player.PlayerId;
-
-            return 0;
-        }
+        OwnedBy = player.Guid;
+        OwnerId = player.PlayerId;
     }
 
     public JobValidator JobValidator { get; set; }
@@ -295,15 +293,14 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
     }
 
     // The owner's job slot frees the moment the job leaves their hands. Host only: ownership
-    // and slot counts live on the server.
+    // and slot counts live on the server. Matched on player id, not Guid - see SetOwner.
     private void ReleaseFromOwner()
     {
-        if (OwnedBy == Guid.Empty || !NetworkLifecycle.Instance.IsHost())
+        if (OwnerId == 0 || !NetworkLifecycle.Instance.IsHost())
             return;
 
-        foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
-            if (player.Guid == OwnedBy)
-                player.RemoveTakenJob(NetId);
+        if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(OwnerId, out ServerPlayer player))
+            player.RemoveTakenJob(NetId);
     }
 
     private void OnJobAbandoned(Job job)

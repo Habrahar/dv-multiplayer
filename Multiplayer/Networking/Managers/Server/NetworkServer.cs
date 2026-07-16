@@ -2069,7 +2069,7 @@ public class NetworkServer : NetworkManager
         }
 
         // First one through wins; the losers never see it offered again.
-        if (netJob.OwnedBy != Guid.Empty)
+        if (netJob.OwnerId != 0)
         {
             LogWarning($"[Diag] Jobs: refused {player.Username} job {job.ID} - already taken by someone else");
             return;
@@ -2087,7 +2087,7 @@ public class NetworkServer : NetworkManager
             return;
         }
 
-        netJob.OwnedBy = player.Guid;
+        netJob.SetOwner(player);
         player.AddTakenJob(netJob.NetId);
 
         // The host's JobsManager holds every job regardless of owner: its Update is what ticks

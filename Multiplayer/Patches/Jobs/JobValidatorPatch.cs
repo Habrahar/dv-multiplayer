@@ -94,7 +94,7 @@ public static class JobValidator_Patch
         if (__state.State != JobState.InProgress)
             return;
 
-        if (!NetworkedJob.TryGetFromJob(__state, out NetworkedJob networkedJob) || networkedJob.OwnedBy != Guid.Empty)
+        if (!NetworkedJob.TryGetFromJob(__state, out NetworkedJob networkedJob) || networkedJob.OwnerId != 0)
             return;
 
         ServerPlayer host = HostPlayer();
@@ -102,7 +102,7 @@ public static class JobValidator_Patch
         if (host == null)
             return;
 
-        networkedJob.OwnedBy = host.Guid;
+        networkedJob.SetOwner(host);
         host.AddTakenJob(networkedJob.NetId);
     }
 
