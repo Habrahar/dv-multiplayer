@@ -1303,39 +1303,7 @@ public class NetworkClient : NetworkManager
 
     private void OnCommonItemChangePacket(CommonItemChangePacket packet)
     {
-        //LogDebug(() => $"OnCommonItemChangePacket({packet?.Items?.Count})");
-
-
-        //LogDebug(() =>
-        //{
-        //    string debug = "";
-
-        //    foreach (var item in packet?.Items)
-        //    {
-        //        debug += "UpdateType: " + item?.UpdateType + "\r\n";
-        //        debug += "itemNetId: " + item?.ItemNetId + "\r\n";
-        //        debug += "PrefabName: " + item?.PrefabName + "\r\n";
-        //        debug += "Equipped: " + item?.ItemState + "\r\n";
-        //        debug += "Position: " + item?.ItemPosition + "\r\n";
-        //        debug += "Rotation: " + item?.ItemRotation + "\r\n";
-        //        debug += "ThrowDirection: " + item?.ThrowDirection + "\r\n";
-        //        debug += "Player: " + item?.Player + "\r\n";
-        //        debug += "CarNetId: " + item?.CarNetId + "\r\n";
-        //        debug += "AttachedFront: " + item?.AttachedFront + "\r\n";
-
-        //        debug += $"States: {item?.States?.Count}\r\n";
-
-        //        if (item.States != null)
-        //            foreach (var state in item?.States)
-        //                debug += "\t" + state.Key + ": " + state.Value + "\r\n";
-        //        else
-        //            debug += "\r\n";
-        //    }
-
-        //    return debug;
-        //});
-
-        //NetworkedItemManager.Instance.ReceiveSnapshots(packet.Items, null);
+        NetworkedItemManager.Instance.ReceiveSnapshots(packet.Items, null);
     }
 
     private void OnCommonPaintThemePacket(CommonPaintThemePacket packet)

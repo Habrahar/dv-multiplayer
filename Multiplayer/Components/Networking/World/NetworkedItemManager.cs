@@ -41,6 +41,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     //cache for client-sided items & spawns
     private Dictionary<string, List<NetworkedItem>> CachedItems = new(1024); //Client cached items
+    private HashSet<NetworkedItem> CachedItemSet = new(1024);                //Guard against caching the same instance twice
     private Dictionary<string, InventoryItemSpec> ItemPrefabs = new(1024);   //Item prefabs
     private bool ClientInitialised = false;
 
@@ -129,6 +130,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         }
         else
         {
+            SuppressLocalWorldItems();
             ProcessClientChanges(tick);
         }
     }
@@ -244,7 +246,8 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                     player.KnownItems[nearbyItem] = tick;
 
                     //prevent propagation of creates for special items
-                    if(!DoNotCreateItem(nearbyItem.GetType()))
+                    //(GetType() here would always be NetworkedItem - the paper types live in TrackedItemType)
+                    if(!DoNotCreateItem(nearbyItem.TrackedItemType))
                         playerUpdates.Add(snapshot);
                 }
                 else
@@ -361,6 +364,74 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     #region Client
 
+    // The game keeps world items disabled until the player is within reach of their 128 m grid
+    // cell (ItemDisablerGrid) and re-activates them itself as the player moves, so the one-time
+    // sweep at login can never hold: local copies keep appearing - and reappearing - afterwards.
+    // This pass repeats the sweep, returning to the cache anything the server has no id for.
+    private const float SUPPRESS_SWEEP_PERIOD = 1f;
+    private float lastSuppressSweep;
+
+    private void SuppressLocalWorldItems()
+    {
+        if (!ClientInitialised || Time.time - lastSuppressSweep < SUPPRESS_SWEEP_PERIOD)
+            return;
+
+        lastSuppressSweep = Time.time;
+
+        int suppressed = 0, reHidden = 0;
+
+        foreach (var item in NetworkedItem.GetAll())
+        {
+            try
+            {
+                if (item == null || item.NetId != 0 || !item.gameObject.activeSelf)
+                    continue;
+
+                // ItemDisabler re-activates items it disabled itself, cached or not - put those back
+                if (CachedItemSet.Contains(item))
+                {
+                    item.gameObject.SetActive(false);
+                    reHidden++;
+                    continue;
+                }
+
+                if (!ShouldSuppressLocalItem(item))
+                    continue;
+
+                SendToCache(item);
+                suppressed++;
+            }
+            catch (Exception ex)
+            {
+                NetworkLifecycle.Instance.Client.LogError($"SuppressLocalWorldItems() {item?.name}: {ex.Message}");
+            }
+        }
+
+        if (suppressed > 0 || reHidden > 0)
+            Multiplayer.Log($"[Diag] Items: sweep suppressed {suppressed} local item(s), re-hid {reHidden} cached item(s) the game re-activated.");
+    }
+
+    // Job papers are created and destroyed by the job system on every client, and the player's
+    // own gear stays local until inventories are synchronised - neither must be hidden.
+    private bool ShouldSuppressLocalItem(NetworkedItem item)
+    {
+        if (item.Item == null)
+            return false;
+
+        if (item.Item.IsEssential() || item.Item.IsGrabbed())
+            return false;
+
+        if (StorageController.Instance.StorageInventory.ContainsItem(item.Item))
+            return false;
+
+        if (item.GetComponent<JobOverview>() != null || item.GetComponent<JobBooklet>() != null ||
+            item.GetComponent<JobReport>() != null || item.GetComponent<JobExpiredReport>() != null ||
+            item.GetComponent<JobMissingLicenseReport>() != null)
+            return false;
+
+        return true;
+    }
+
     private void ProcessClientChanges(uint tick)
     {
         List<ItemUpdateData> changedItems = new List<ItemUpdateData>();
@@ -370,6 +441,11 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
         foreach (var item in NetworkedItem.GetAll())
         {
+            // The server never issued an id for this item, so a snapshot could not name it;
+            // local-only items stay local until the suppression sweep picks them up.
+            if (item.NetId == 0)
+                continue;
+
             ItemUpdateData snapshot = item.GetSnapshot();
             if (snapshot != null)
             {
@@ -439,8 +515,10 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             newItem = gameObject.GetOrAddComponent<NetworkedItem>();
         }
 
-        newItem.gameObject.SetActive(true);
+        // Id first: anything that reacts to activation must already see a server-owned item,
+        // or the suppression sweep could mistake it for a local copy.
         newItem.NetId = snapshot.ItemNetId;
+        newItem.gameObject.SetActive(true);
 
         newItem.ReceiveSnapshot(snapshot);
     }
@@ -531,6 +609,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
             var cachedItem = items[items.Count - 1];
             items.RemoveAt(items.Count - 1);
+            CachedItemSet.Remove(cachedItem);
             return cachedItem;
         }
 
@@ -539,6 +618,17 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     private void SendToCache(NetworkedItem netItem)
     {
+        if (netItem == null)
+            return;
+
+        // Already pooled: just make sure it is hidden, without a second list entry -
+        // one instance handed out twice would wear two NetIds at once.
+        if (!CachedItemSet.Add(netItem))
+        {
+            netItem.gameObject.SetActive(false);
+            return;
+        }
+
         string prefabName = netItem?.Item?.InventorySpecs?.itemPrefabName;
 
         //NetworkLifecycle.Instance.Client.LogDebug(() => $"Caching Spawned Item: {prefabName ?? ""}");
@@ -583,6 +673,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     public bool DoNotCreateItem(Type itemType)
     {
+        if (itemType == null)
+            return false;
+
         if (
             itemType == typeof(JobOverview) ||
             itemType == typeof(JobBooklet) ||
