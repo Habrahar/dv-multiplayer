@@ -91,6 +91,12 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private bool stateDirty;
     private bool wasThrown;
 
+    //Host only: a thrown or dropped item keeps moving after the state change, and nobody
+    //re-reports where it stopped - every copy would come to rest somewhere else. Watch for
+    //the rigidbody falling asleep and send one final position.
+    private bool settleWatch;
+    private bool settleSyncDue;
+
     private Vector3 thrownPosition;
     private Quaternion thrownRotation;
     private Vector3 throwDirection;
@@ -299,12 +305,25 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (Item == null && Register() == false)
             return null;
 
-        if (!stateDirty && !hasDirtyVals)
+        if (settleWatch && (lastState == ItemState.Dropped || lastState == ItemState.Thrown) &&
+            Item.ItemRigidbody != null && Item.ItemRigidbody.IsSleeping())
+        {
+            settleWatch = false;
+            wasThrown = false;  //report where it lies, not where it flew from
+            settleSyncDue = true;
+        }
+
+        if (!stateDirty && !hasDirtyVals && !settleSyncDue)
             return null;
 
         ItemState currentState = GetItemState();
 
-        if (!createdDirty)
+        if (settleSyncDue)
+        {
+            updateType = ItemUpdateData.ItemUpdateType.FullSync;
+            settleSyncDue = false;
+        }
+        else if (!createdDirty)
         {
             if (lastState != currentState)
                 updateType |= ItemUpdateData.ItemUpdateType.ItemState;
@@ -323,6 +342,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //no changes this snapshot
         if (updateType == ItemUpdateData.ItemUpdateType.None)
             return null;
+
+        //arm the settle watch on a fresh transition into a free-moving state (host judges rest)
+        if (NetworkLifecycle.Instance.IsHost() && lastState != currentState &&
+            (currentState == ItemState.Dropped || currentState == ItemState.Thrown))
+            settleWatch = true;
 
         lastState = currentState;
         LastDirtyTick = NetworkLifecycle.Instance.Tick;
@@ -344,8 +368,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         if (!registrationComplete)
         {
-            Multiplayer.Log($"NetworkedItem.ReceiveSnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}. Queuing");
+            Multiplayer.LogDebug(() => $"NetworkedItem.ReceiveSnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}. Queuing");
             pendingSnapshots.Enqueue(snapshot);
+
+            //a healthy item finalises within a frame or two; a growing queue means someone
+            //called Initialize and never FinaliseTrackedValues - the item would stay deaf forever
+            if (pendingSnapshots.Count == 10)
+                Multiplayer.LogError($"NetworkedItem.ReceiveSnapshot() netId: {NetId}, name: {name}: 10 snapshots queued and registration still incomplete - missing FinaliseTrackedValues for this item type?");
             return;
         }
 
@@ -356,7 +385,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     {
         if (snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.ItemState) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.FullSync) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.Create))
         {
-            Multiplayer.Log($"NetworkedItem.ApplySnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}, ItemState: {snapshot?.ItemState}, Active state: {gameObject.activeInHierarchy}");
+            Multiplayer.LogDebug(() => $"NetworkedItem.ApplySnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}, ItemState: {snapshot?.ItemState}, Active state: {gameObject.activeInHierarchy}");
 
             switch (snapshot.ItemState)
             {
@@ -378,21 +407,25 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
                     throw new Exception($"NetworkedItem.ApplySnapshot() Item state not implemented: {snapshot?.ItemState}");
 
             }
-        }
 
-        Multiplayer.Log($"NetworkedItem.ApplySnapshot() netID: {snapshot?.ItemNetId}, ItemUpdateType {snapshot?.UpdateType} About to process states");
+            //remember the applied state, or the next local event would diff against a stale one
+            lastState = snapshot.ItemState;
+
+            //a client threw or dropped it: the host's physics now decides where it comes to rest
+            if (NetworkLifecycle.Instance.IsHost() &&
+                (snapshot.ItemState == ItemState.Dropped || snapshot.ItemState == ItemState.Thrown))
+                settleWatch = true;
+        }
 
         if (snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.Create) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.ObjectState))
         {
-            Multiplayer.Log($"NetworkedItem.ApplySnapshot() netID: {snapshot?.ItemNetId}, States: {snapshot?.States?.Count}");
+            Multiplayer.LogDebug(() => $"NetworkedItem.ApplySnapshot() netID: {snapshot?.ItemNetId}, States: {snapshot?.States?.Count}");
 
             if (trackedItem != null && snapshot.States != null)
             {
                 ApplyTrackedValues(snapshot.States);
             }
         }
-
-        Multiplayer.Log($"NetworkedItem.ApplySnapshot() netID: {snapshot?.ItemNetId}, ItemUpdateType {snapshot?.UpdateType} states processed");
 
         //mark values as clean
         createdDirty = false;

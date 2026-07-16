@@ -301,7 +301,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         {
             if (ValidatePlayerAction(snapshot, player)) //Ensure the player can do this
             {
-                NetworkLifecycle.Instance.Server.LogWarning($"NetworkedItemManager.ProcessReceivedAsHost() ItemNetId: {snapshot.ItemNetId}, snapshot type: {snapshot.UpdateType}");
+                NetworkLifecycle.Instance.Server.LogDebug(() => $"NetworkedItemManager.ProcessReceivedAsHost() ItemNetId: {snapshot.ItemNetId}, snapshot type: {snapshot.UpdateType}");
                 netItem.ReceiveSnapshot(snapshot);
             }
             else

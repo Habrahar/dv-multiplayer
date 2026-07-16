@@ -28,6 +28,7 @@ public static class BookletCreator_Patch
         {
             NetworkedItem netItem = __result.GetOrAddComponent<NetworkedItem>();
             netItem.Initialize(__result, 0, false);
+            netItem.FinaliseTrackedValues(); // papers track no values; without this their snapshot queue never drains
             networkedJob.JobOverview =  netItem;
         }
     }
@@ -47,6 +48,7 @@ public static class BookletCreator_Patch
         {
             NetworkedItem netItem = __result.GetOrAddComponent<NetworkedItem>();
             netItem.Initialize(__result, 0, false);
+            netItem.FinaliseTrackedValues(); // papers track no values; without this their snapshot queue never drains
             networkedJob.JobBooklet = netItem;
         }
     }
@@ -66,6 +68,7 @@ public static class BookletCreator_Patch
         {
             NetworkedItem netItem = __result.GetOrAddComponent<NetworkedItem>();
             netItem.Initialize(__result, 0, false);
+            netItem.FinaliseTrackedValues(); // papers track no values; without this their snapshot queue never drains
             networkedJob.JobReport = netItem;
         }
     }
