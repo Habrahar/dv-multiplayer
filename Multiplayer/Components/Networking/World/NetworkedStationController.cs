@@ -359,6 +359,12 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
 
             if (mineOnJoin)
                 newJob.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
+
+            // The booklet is only ever printed by a live state change, which joining is not, so
+            // without this the paper never exists here - while the host, which counts it as sent,
+            // keeps addressing snapshots to an item we do not have (B18).
+            if (jobData.ItemNetID != 0)
+                GenerateBooklet(networkedJob, jobData.ItemNetID, jobData.ItemPosition);
         }
         else
         {
@@ -653,6 +659,20 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
         netItem.FinaliseTrackedValues();
         networkedJob.JobOverview = netItem;
         StationController.spawnedJobOverviews.Add(jobOverview);
+    }
+
+    // The booklet of a job that was already under way when we arrived. JobData carries the
+    // host's netId and position for it, so the paper lands where the owner left it.
+    private void GenerateBooklet(NetworkedJob networkedJob, ushort itemNetId, ItemPositionData posData)
+    {
+        Multiplayer.Log($"GenerateBooklet([{networkedJob.Job.ID},{networkedJob.Job.jobType}], {itemNetId}) Position: {posData.Position}");
+
+        JobBooklet jobBooklet = BookletCreator.CreateJobBooklet(networkedJob.Job, posData.Position + WorldMover.currentMove, posData.Rotation, WorldMover.OriginShiftParent, true);
+
+        NetworkedItem netItem = jobBooklet.GetOrAddComponent<NetworkedItem>();
+        netItem.Initialize(jobBooklet, itemNetId, false);
+        netItem.FinaliseTrackedValues();
+        networkedJob.JobBooklet = netItem;
     }
     #endregion
 }

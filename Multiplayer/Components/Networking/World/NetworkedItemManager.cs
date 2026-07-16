@@ -202,6 +202,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     #region Server
 
+    //reused each pass; NearbyItems cannot be edited while it is being walked
+    private readonly List<NetworkedItem> staleItems = new(64);
+
     private void UpdatePlayerItemLists()
     {
         float currentTime = Time.time;
@@ -230,17 +233,17 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 }
             }
 
-            // Remove items that are no longer nearby
-            for (int i = 0; i < player.NearbyItems.Count; i++)
-            {
-                var kvp = player.NearbyItems.ElementAt(i);
+            // Remove items that are no longer nearby. Collect first: removing inside an indexed
+            // ElementAt() walk shifts the dictionary under the index and skips entries, so stale
+            // items lingered - and ElementAt() on a dictionary is O(n), making the walk O(n^2).
+            staleItems.Clear();
 
+            foreach (var kvp in player.NearbyItems)
                 if (currentTime - kvp.Value > NEARBY_REMOVAL_DELAY)
-                {
-                    //NetworkLifecycle.Instance.Server.LogDebug(() => $"UpdatePlayerItemLists() Removing for player: {player?.Username}, Nearby Item: {kvp.Key?.NetId}, {kvp.Key?.name}");
-                    player.NearbyItems.Remove(kvp.Key);
-                }
-            }
+                    staleItems.Add(kvp.Key);
+
+            foreach (var item in staleItems)
+                player.NearbyItems.Remove(item);
         }
     }
 
@@ -274,11 +277,19 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                     //NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) New item for: {player.Username}, itemNetID{nearbyItem.NetId}");
 
                     ItemUpdateData snapshot = nearbyItem.CreateUpdateData(ItemUpdateData.ItemUpdateType.Create);
+
+                    // Could not describe the item, so the player cannot receive it. Calling it
+                    // known anyway would leave us addressing state to an item they will never
+                    // have, for the rest of the session (B18). Try again next tick instead.
+                    if (snapshot == null)
+                        continue;
+
                     player.KnownItems[nearbyItem] = tick;
 
                     //prevent propagation of creates for special items
                     //(GetType() here would always be NetworkedItem - the paper types live in TrackedItemType)
-                    if(snapshot != null && !DoNotCreateItem(nearbyItem.TrackedItemType))
+                    //the job system makes these on every machine, so they are known without a Create
+                    if(!DoNotCreateItem(nearbyItem.TrackedItemType))
                         playerUpdates.Add(snapshot);
                 }
                 else
