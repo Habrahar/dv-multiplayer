@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using DV.CabControls;
 using DV.Utils;
 using UnityEngine;
 using JetBrains.Annotations;
@@ -461,13 +462,30 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         if (NetworkLifecycle.Instance.IsHost())
             return;
 
+        // Diagnostic: this sweep is supposed to leave the client with no world items of its
+        // own, so that the server's are the only ones. In game every player still has their own
+        // copy of everything, so it is not doing that. Count what it actually sees.
+        int seen = 0, cached = 0, essential = 0, grabbed = 0, inInventory = 0, noItemBase = 0;
+
         // Remove all spawned world items and place them into a cache for later use
         foreach (var item in NetworkedItem.GetAll())
         {
             try
             {
+                seen++;
+
+                if (item.Item == null)
+                    noItemBase++;
+                else if (item.Item.IsEssential())
+                    essential++;
+                else if (item.Item.IsGrabbed())
+                    grabbed++;
+                else if (StorageController.Instance.StorageInventory.ContainsItem(item.Item))
+                    inInventory++;
+
                 if (item.Item != null && !item.Item.IsEssential() && !item.Item.IsGrabbed() && !StorageController.Instance.StorageInventory.ContainsItem(item.Item))
                 {
+                    cached++;
                     SendToCache(item);
                 }
                 //else
@@ -481,7 +499,29 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             }
         }
 
+        Multiplayer.Log($"[ItemDiag] CacheWorldItems() saw {seen} items, cached {cached}. Skipped: {essential} essential, {grabbed} grabbed, {inInventory} in inventory, {noItemBase} with no ItemBase.");
+
         ClientInitialised = true;
+    }
+
+    // Diagnostic: how many items turn up after the sweep has already run? If the world's items
+    // stream in later, the sweep can never have caught them, and every one of these is a local
+    // copy the server knows nothing about - which is what duplicate items look like from here.
+    private int lateItems;
+    private float lastLateReport;
+
+    public void ReportLateItem(ItemBase item)
+    {
+        if (!ClientInitialised || NetworkLifecycle.Instance.IsHost())
+            return;
+
+        lateItems++;
+
+        if (Time.time - lastLateReport < 5f)
+            return;
+
+        lastLateReport = Time.time;
+        Multiplayer.Log($"[ItemDiag] {lateItems} item(s) have appeared since CacheWorldItems ran. Newest: {item?.InventorySpecs?.itemPrefabName ?? "?"}");
     }
 
     private NetworkedItem GetFromCache(string prefabName)

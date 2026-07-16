@@ -15,6 +15,10 @@ public static class ItemBase_Patch
         //Multiplayer.Log($"ItemBase.Awake() ItemSpec: {__instance?.InventorySpecs?.itemPrefabName}");
         var networkedItem = __instance.GetOrAddComponent<NetworkedItem>();
 
+        // Diagnostic only. This is also the hook that would suppress a client's own world items
+        // once they come from the server instead.
+        NetworkedItemManager.Instance?.ReportLateItem(__instance);
+
         //networkedItem.FinaliseTrackedValues();
         return;
     }
