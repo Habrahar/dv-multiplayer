@@ -362,39 +362,33 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     private bool ValidatePlayerAction(ItemUpdateData snapshot, ServerPlayer player)
     {
-        return true;
         // Must have valid item
         if (!NetworkedItem.TryGet(snapshot.ItemNetId, out NetworkedItem networkedItem))
             return false;
 
-        Multiplayer.LogDebug(() => $"ValidatePlayerAction() ItemId: {snapshot.ItemNetId}, name: {networkedItem.name} Update Type: {snapshot.UpdateType}, Item State: {snapshot.ItemState}, Player: {player.Username}");
+        // Whoever holds it is the only one who may act on it. Nobody holding it is fair game:
+        // ownership lives only in the server's memory, so treating unowned as forbidden would
+        // strand items no one could ever pick up or put down again.
+        GetItemOwner(snapshot.ItemNetId, out ServerPlayer currentOwner);
 
-        switch (snapshot.ItemState)
+        if (currentOwner != null && currentOwner != player)
         {
-            case ItemState.InHand:
-            case ItemState.InInventory:
-                // Check if someone else owns it
-                GetItemOwner(snapshot.ItemNetId, out ServerPlayer currentOwner);
-                Multiplayer.LogDebug(() => $"ValidatePlayerAction() ItemId: {snapshot.ItemNetId}, name: {networkedItem.name} Update Type: {snapshot.UpdateType}, Item State: {snapshot.ItemState}, Player: {player?.Username}, Current Owner: {currentOwner?.Username}");
+            NetworkLifecycle.Instance.Server.LogWarning($"ValidatePlayerAction() {player.Username} touched item {snapshot.ItemNetId} ({networkedItem.name}, {snapshot.ItemState}) held by {currentOwner.Username}. Refused");
+            return false;
+        }
 
-                if (currentOwner != null && currentOwner != player)
-                    return false;
-
-                // Check pickup distance
-                float distance = Vector3.Distance(player.WorldPosition, networkedItem.transform.position);
-                if (distance > MAX_REACH_DISTANCE)
-                    return false;
-
-                Multiplayer.LogDebug(() => $"ValidatePlayerAction() ItemId: {snapshot.ItemNetId}, name: {networkedItem.name} Update Type: {snapshot.UpdateType}, Item State: {snapshot.ItemState}, Player: {player.Username}, Distance check: {distance}");
-                break;
-
-            case ItemState.Dropped:
-            case ItemState.Thrown:
-            case ItemState.Attached: //needs additional checks for distance to coupler
-                // Only owner can drop/throw
-                if (!player.OwnsItem(snapshot.ItemNetId))
-                    return false;
-                break;
+        // Distance only on a fresh pickup. Once held, the item is deactivated and its transform
+        // stays frozen where it was picked up, so an owner who walked away would fail a check
+        // they cannot pass - and could never put the item down again (B5).
+        if ((snapshot.ItemState == ItemState.InHand || snapshot.ItemState == ItemState.InInventory)
+            && currentOwner == null)
+        {
+            float distance = Vector3.Distance(player.WorldPosition, networkedItem.transform.position);
+            if (distance > MAX_REACH_DISTANCE)
+            {
+                NetworkLifecycle.Instance.Server.LogWarning($"ValidatePlayerAction() {player.Username} reached item {snapshot.ItemNetId} ({networkedItem.name}) from {distance:F1} m, max {MAX_REACH_DISTANCE:F1} m. Refused");
+                return false;
+            }
         }
 
         return true;
