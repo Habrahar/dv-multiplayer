@@ -297,6 +297,11 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             return;
         }
 
+        // Player arrives off the wire and decides who ends up owning the item. Whoever sent the
+        // packet is the only one who can have acted, so name them and ignore the claim - naming
+        // someone else would hand them an item they never touched, and lock it there.
+        snapshot.Player = player.PlayerId;
+
         if (NetworkedItem.TryGet(snapshot.ItemNetId, out NetworkedItem netItem))
         {
             if (ValidatePlayerAction(snapshot, player)) //Ensure the player can do this

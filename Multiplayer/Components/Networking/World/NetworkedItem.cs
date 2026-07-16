@@ -621,6 +621,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(snapshot.Player, out ServerPlayer player) && player.OwnsItem(NetId))
                 player.RemoveOwnedItem(NetId);
 
+        //An item in an inventory is not hidden, it is frozen: Inventory.FinalizeRemoveItemFromWorld
+        //makes it kinematic and moves it to the inventory layer. Re-activating it is not enough -
+        //without the game's own counterpart it comes back deaf to gravity and to the throw below,
+        //hanging wherever we put it. Pass activate: false; we place it ourselves, and the game
+        //would teleport it to the *local* player.
+        Inventory.Instance.ReturnItemToWorld(gameObject, false);
+
         //activate and relocate item
         gameObject.SetActive(true);
         transform.position = snapshot.ItemPosition + WorldMover.currentMove;
