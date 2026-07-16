@@ -38,6 +38,7 @@ using Multiplayer.Networking.Packets.Serverbound.Jobs;
 using Multiplayer.Networking.Packets.Serverbound.Train;
 using Multiplayer.Networking.Packets.Unconnected;
 using Multiplayer.Networking.TransportLayers;
+using DV.Booklets;
 using Multiplayer.Patches.Jobs;
 using Multiplayer.Patches.MainMenu;
 using Multiplayer.Patches.World;
@@ -2099,7 +2100,18 @@ public class NetworkServer : NetworkManager
         netStation.StationController.spawnedJobOverviews.Remove(overview);
         overview.DestroyJobOverview();
 
-        Log($"[Diag] Jobs: {job.ID} taken by {player.Username} ({player.TakenJobCount}/{player.AllowedConcurrentJobs} slots). No booklet printed on the host");
+        // The booklet has to exist here even when the taker is far away, and not because of the
+        // paper. Its NetId is the only thing that tells the owner's client which item to spawn,
+        // and handing the job in later runs through this very object on the server. Skipping it
+        // left the owner waiting on a booklet that was never announced, until their validator
+        // timed out and told them they had been refused - for a job they had in fact been given.
+        JobBooklet booklet = BookletCreator.CreateJobBooklet(job, netStation.JobValidator.bookletPrinter.spawnAnchor.position, netStation.JobValidator.bookletPrinter.spawnAnchor.rotation, WorldMover.OriginShiftParent, true);
+
+        // Only the paper is the host's to refuse: hide it unless the job is theirs.
+        if (booklet != null && !player.IsHost)
+            booklet.gameObject.SetActive(false);
+
+        Log($"[Diag] Jobs: {job.ID} taken by {player.Username} ({player.TakenJobCount}/{player.AllowedConcurrentJobs} slots). Booklet netId {netJob.JobBooklet?.NetId}, hidden on host: {!player.IsHost}");
     }
 
     private void OnServerboundWarehouseMachineControllerRequestPacket(ServerboundWarehouseMachineControllerRequestPacket packet, ITransportPeer peer)
