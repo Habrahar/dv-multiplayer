@@ -7,6 +7,7 @@ using Multiplayer.Components.Networking;
 using Multiplayer.Networking.Data;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Linq;
 
 namespace Multiplayer.Components.SaveGame;
 
@@ -20,8 +21,6 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
         base.Awake();
         if (!NetworkLifecycle.Instance.IsHost())
             return;
-        LicenseManager.Instance.LicenseAcquired += Server_OnLicenseAcquired;
-        LicenseManager.Instance.JobLicenseAcquired += Server_OnJobLicenseAcquired;
         LicenseManager.Instance.GarageUnlocked += Server_OnGarageUnlocked;
     }
 
@@ -32,22 +31,16 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
             return;
         if (!NetworkLifecycle.Instance.IsHost())
             return;
-        LicenseManager.Instance.LicenseAcquired -= Server_OnLicenseAcquired;
-        LicenseManager.Instance.JobLicenseAcquired -= Server_OnJobLicenseAcquired;
         LicenseManager.Instance.GarageUnlocked -= Server_OnGarageUnlocked;
     }
 
+    // LicenseAcquired and JobLicenseAcquired are gone from here. This LicenseManager is the
+    // host's own, so those events only ever said "the host got a licence", and broadcasting
+    // that is what made licences shared. A client's purchase is now answered straight to the
+    // buyer from NetworkServer. GarageUnlocked stays: garages are opened by a padlock in the
+    // world, not bought, so there is no buyer to answer and they remain shared.
+
     #region Server
-
-    private static void Server_OnLicenseAcquired(GeneralLicenseType_v2 license)
-    {
-        NetworkLifecycle.Instance.Server.SendLicense(license.id, false);
-    }
-
-    private static void Server_OnJobLicenseAcquired(JobLicenseType_v2 license)
-    {
-        NetworkLifecycle.Instance.Server.SendLicense(license.id, true);
-    }
 
     private static void Server_OnGarageUnlocked(GarageType_v2 garage)
     {
@@ -68,6 +61,8 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
             playerData.SetVector3(SaveGameKeys.Player_position, player.AbsoluteWorldPosition);
             playerData.SetFloat(SaveGameKeys.Player_rotation, player.WorldRotationY);
             playerData.SetFloat(SaveGameKeys.Player_money, (float)player.Money);
+            playerData.SetStringArray(SaveGameKeys.Licenses_General, player.AcquiredGeneralLicenses.ToArray());
+            playerData.SetStringArray(SaveGameKeys.Licenses_Jobs, player.AcquiredJobLicenses.ToArray());
             //store inventory see StorageSerializer.SaveStorage()
             players.SetJObject(player.Guid.ToString(), playerData);
         }

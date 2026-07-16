@@ -788,21 +788,27 @@ public class NetworkServer : NetworkManager
         );
     }
 
-    public void SendLicense(string id, bool isJobLicense)
+    // Licences are personal, so these go to the one player who earned them. The host reads its
+    // own out of LicenseManager and needs no packet, exactly as with SendMoney.
+    public void SendLicense(ServerPlayer player, string id, bool isJobLicense)
     {
-        SendPacketToAll
+        if (player == null || player.IsHost || player.LoadingState < PlayerLoadingState.ReadyForWorldState)
+            return;
+
+        SendPacket
         (
+            player.Peer,
             new ClientboundLicenseAcquiredPacket
             {
                 Id = id,
                 IsJobLicense = isJobLicense
             },
-            DeliveryMethod.ReliableUnordered,
-            PlayerLoadingState.ReadyForWorldState,
-            excludeSelf: true
+            DeliveryMethod.ReliableUnordered
         );
     }
 
+    // Still a broadcast, unlike licences: a garage is opened by a padlock in the world rather
+    // than bought, so nothing here knows whose it is. Shared until work trains are sorted out.
     public void SendGarage(string id)
     {
         SendPacketToAll
@@ -1980,10 +1986,14 @@ public class NetworkServer : NetworkManager
             return;
         }
 
+        // Only clients reach this handler; the host's terminal runs vanilla and grants its own
+        // licence locally. LicenseManager.Instance here is the *host's* manager, so acquiring
+        // through it both gave the host a licence it never bought and fired the event that
+        // broadcast it to everyone. That is how licences ended up shared.
         if (packet.IsJobLicense)
-            LicenseManager.Instance.AcquireJobLicense(jobLicense);
+            player.AddJobLicense(jobLicense.id);
         else
-            LicenseManager.Instance.AcquireGeneralLicense(generalLicense);
+            player.AddGeneralLicense(generalLicense.id);
 
         SendRpcResponse(packet.TicketId, new LicensePurchaseResponse { Response = LicensePurchaseResponse.ResponseType.Success }, peer);
     }

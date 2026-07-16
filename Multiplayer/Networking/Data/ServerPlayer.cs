@@ -1,5 +1,7 @@
 using DV.InventorySystem;
 using DV.JObjectExtstensions;
+using DV.ThingTypes;
+using DV.ThingTypes.TransitionHelpers;
 using Multiplayer.Components.Networking;
 using Multiplayer.Components.Networking.Train;
 using Multiplayer.Components.Networking.World;
@@ -11,6 +13,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Multiplayer.Networking.Data;
@@ -253,6 +256,60 @@ public class ServerPlayer : IDisposable
     {
         _money = Math.Max(0d, value);
         NetworkLifecycle.Instance.Server.SendMoney(this);
+    }
+    #endregion
+
+    #region Licenses
+    // Same split as the wallet: the host's licences are its own LicenseManager, which the
+    // vanilla save owns, and remote players carry their own sets persisted per Guid. Nothing
+    // here is meaningful for the host - read its licences from the save instead.
+    // Garages are deliberately absent: they are unlocked by a padlock out in the world, not
+    // bought, so there is no server-side moment to attribute one to a player. They stay shared
+    // until work trains get sorted out.
+    private readonly HashSet<string> generalLicenses = [];
+    private readonly HashSet<string> jobLicenses = [];
+
+    public IReadOnlyCollection<string> AcquiredGeneralLicenses => generalLicenses;
+    public IReadOnlyCollection<string> AcquiredJobLicenses => jobLicenses;
+
+    /// <summary>
+    /// What a player who has never joined before starts with. Vanilla's LoadData forces these
+    /// on anyone not in restricted mode anyway, complaining to the log as it goes, so handing
+    /// them over up front is the only story the game will accept quietly.
+    /// </summary>
+    public static IEnumerable<string> StartingGeneralLicenses =>
+        LicenseManager.TutorialGeneralLicenses.Select(license => license.id);
+
+    public static IEnumerable<string> StartingJobLicenses =>
+        [JobLicenses.FreightHaul.ToV2().id];
+
+    public bool AddGeneralLicense(string id)
+    {
+        if (IsHost || !generalLicenses.Add(id))
+            return false;
+
+        NetworkLifecycle.Instance.Server.SendLicense(this, id, false);
+        return true;
+    }
+
+    public bool AddJobLicense(string id)
+    {
+        if (IsHost || !jobLicenses.Add(id))
+            return false;
+
+        NetworkLifecycle.Instance.Server.SendLicense(this, id, true);
+        return true;
+    }
+
+    // Restored from the save on join, so no packets: the balance and the licences both travel
+    // in the ClientboundSaveGameDataPacket the caller is building.
+    public void LoadLicenses(string[] general, string[] job)
+    {
+        generalLicenses.Clear();
+        jobLicenses.Clear();
+
+        generalLicenses.UnionWith(general ?? StartingGeneralLicenses.ToArray());
+        jobLicenses.UnionWith(job ?? StartingJobLicenses.ToArray());
     }
     #endregion
 

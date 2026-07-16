@@ -10,6 +10,7 @@ using Multiplayer.Networking.Data.Items;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Multiplayer.Networking.Packets.Clientbound;
@@ -55,7 +56,17 @@ public class ClientboundSaveGameDataPacket
         // The host is skipped: it has no saved player data, and its wallet is the
         // local Inventory, which the vanilla save has already restored.
         if (!player.IsHost)
+        {
             player.SetMoney(playerData?.GetFloat(SaveGameKeys.Player_money) ?? ServerPlayer.STARTING_MONEY);
+
+            // Null, not empty, for a first-time player: LoadLicenses reads that as "give them
+            // the starting set". An empty array is a player who genuinely owns nothing.
+            player.LoadLicenses
+            (
+                playerData?.GetStringArray(SaveGameKeys.Licenses_General),
+                playerData?.GetStringArray(SaveGameKeys.Licenses_Jobs)
+            );
+        }
 
         Multiplayer.LogDebug(() =>
         {
@@ -96,8 +107,11 @@ public class ClientboundSaveGameDataPacket
             GameMode = data.GetString(SaveGameKeys.Game_mode),
             SerializedDifficulty = difficulty.ToString(Formatting.None),
             Money = (float)player.Money,
-            AcquiredGeneralLicenses = data.GetStringArray(SaveGameKeys.Licenses_General),
-            AcquiredJobLicenses = data.GetStringArray(SaveGameKeys.Licenses_Jobs),
+            // The host's licences come from the vanilla save, which owns them; everyone else
+            // gets their own. Handing out the save's arrays is what gave every joiner the
+            // host's progress. Garages stay shared - see NetworkedSaveGameManager.
+            AcquiredGeneralLicenses = player.IsHost ? data.GetStringArray(SaveGameKeys.Licenses_General) : player.AcquiredGeneralLicenses.ToArray(),
+            AcquiredJobLicenses = player.IsHost ? data.GetStringArray(SaveGameKeys.Licenses_Jobs) : player.AcquiredJobLicenses.ToArray(),
             UnlockedGarages = data.GetStringArray(SaveGameKeys.Garages),
             Position = playerData?.GetVector3(SaveGameKeys.Player_position) ?? LevelInfo.DefaultSpawnPosition,
             Rotation = playerData?.GetFloat(SaveGameKeys.Player_rotation) ?? LevelInfo.DefaultSpawnRotation.y,
