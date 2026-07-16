@@ -300,6 +300,41 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     #endregion
 
+    // Host only: the owner is gone, and nobody will ever send another snapshot for this item.
+    // It was hidden on every other machine the moment they picked it up, so without this it
+    // stays invisible and owned forever. Put it back in the world where they left it and let
+    // the normal snapshot flow tell everyone.
+    public void ReleaseFromDisconnectedOwner(Vector3 worldPosition)
+    {
+        Multiplayer.Log($"NetworkedItem.ReleaseFromDisconnectedOwner() netId: {NetId}, name: {name}, dropping at {worldPosition}");
+
+        OwnerId = 0;
+        wasThrown = false;
+
+        Inventory.Instance.ReturnItemToWorld(gameObject, false);
+        gameObject.SetActive(true);
+        transform.position = worldPosition;
+
+        Rigidbody rb = Item?.ItemRigidbody;
+        if (rb != null && !rb.isKinematic)
+        {
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
+
+        //a FullSync carries state and position to everyone nearby, whatever they last heard
+        settleWatch = false;
+        settleSyncDue = true;
+    }
+
+    // Host only: applying someone's snapshot clears the dirty flags, so nothing would ever tell
+    // the *other* players about it. Dating the item now makes ProcessChanged send them a
+    // FullSync; the sender is dated to the same tick so it does not echo back to them.
+    public void MarkRelayDirty()
+    {
+        LastDirtyTick = NetworkLifecycle.Instance.Tick;
+    }
+
     private void ArmSettleWatch()
     {
         settleWatch = true;
@@ -648,6 +683,12 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (snapshot.ItemState == ItemState.Thrown)
         {
             Multiplayer.LogDebug(() => $"NetworkedItem.HandleDroppedOrThrownState() ItemNetId: {snapshot?.ItemNetId} Thrown. Position: {transform.position}, Direction: {snapshot?.ThrowDirection}");
+
+            //keep the direction: OnThrow's echo guard returns before recording it, so without
+            //this the host would relay someone else's throw with a stale direction
+            throwDirection = snapshot.ThrowDirection;
+            thrownPosition = snapshot.ItemPosition;
+            thrownRotation = snapshot.ItemRotation;
 
             wasThrown = true;
             grabHandler?.Throw(snapshot.ThrowDirection);

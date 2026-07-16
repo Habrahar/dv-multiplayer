@@ -57,7 +57,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         if (!NetworkLifecycle.Instance.IsHost())
             return;
 
-        //B99 temporary patch NetworkLifecycle.Instance.Server.PlayerDisconnected += PlayerDisconnected;
+        NetworkLifecycle.Instance.Server.PlayerDisconnected += PlayerDisconnected;
 
         try
         {
@@ -69,9 +69,37 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         }
     }
 
-    private void PlayerDisconnected(uint netID)
+    // Whatever the player was carrying is hidden on every other machine and owned by an id that
+    // will never speak again. Hand the items back to the world at the spot they left from.
+    private void PlayerDisconnected(ServerPlayer player)
     {
-        throw new NotImplementedException();
+        if (player == null)
+            return;
+
+        int released = 0;
+
+        foreach (ushort netId in player.OwnedItems.ToArray())
+        {
+            try
+            {
+                if (!NetworkedItem.TryGet(netId, out NetworkedItem netItem) || netItem == null)
+                    continue;
+
+                //a metre up, so it lands at their feet instead of inside the ground
+                netItem.ReleaseFromDisconnectedOwner(player.WorldPosition + Vector3.up);
+                released++;
+            }
+            catch (Exception ex)
+            {
+                NetworkLifecycle.Instance.Server.LogError($"PlayerDisconnected({player.Username}) item {netId}: {ex.Message}");
+            }
+        }
+
+        player.ClearOwnedItems();
+        player.KnownItems.Clear();
+        player.NearbyItems.Clear();
+
+        Multiplayer.Log($"[Diag] Items: {player.Username} left, returned {released} carried item(s) to the world.");
     }
 
     protected void Start()
@@ -88,6 +116,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             return;
 
         NetworkLifecycle.Instance.OnTick -= Common_OnTick;
+
+        if (NetworkLifecycle.Instance.IsHost())
+            NetworkLifecycle.Instance.Server.PlayerDisconnected -= PlayerDisconnected;
     }
 
     public void AddDirtyItemSnapshot(NetworkedItem netItem, ItemUpdateData snapshot)
@@ -308,6 +339,15 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             {
                 NetworkLifecycle.Instance.Server.LogDebug(() => $"NetworkedItemManager.ProcessReceivedAsHost() ItemNetId: {snapshot.ItemNetId}, snapshot type: {snapshot.UpdateType}");
                 netItem.ReceiveSnapshot(snapshot);
+
+                // Applying the snapshot cleared the dirty flags, so ProcessChanged would tell
+                // nobody: with three players, B never sees what A did. Date the item now so the
+                // others get a FullSync, and date it for the sender too - they already did this,
+                // and replaying a throw at them would add a second impulse.
+                if (player.KnownItems.ContainsKey(netItem))
+                    player.KnownItems[netItem] = NetworkLifecycle.Instance.Tick;
+
+                netItem.MarkRelayDirty();
             }
             else
             {
