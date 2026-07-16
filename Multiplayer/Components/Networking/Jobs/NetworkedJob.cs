@@ -2,6 +2,7 @@ using DV.CabControls;
 using DV.InventorySystem;
 using DV.Logic.Job;
 using Multiplayer.Components.Networking.World;
+using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Jobs;
 using System;
 using System.Collections.Generic;
@@ -127,7 +128,31 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
 
     private readonly List<NetworkedItem> JobReports = [];
 
+    /// <summary>
+    /// Server-side: who took this job, or Guid.Empty while nobody has. A Guid rather than a
+    /// player id so ownership survives the owner disconnecting and coming back with a new id.
+    /// </summary>
     public Guid OwnedBy { get; set; } = Guid.Empty;
+
+    /// <summary>
+    /// The owner's current player id for the wire, or 0 if the job is untaken or its owner is
+    /// away. Clients only ever ask "is this mine?", which a session id answers.
+    /// </summary>
+    public byte OwnerId
+    {
+        get
+        {
+            if (OwnedBy == Guid.Empty || !NetworkLifecycle.Instance.IsHost())
+                return 0;
+
+            foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
+                if (player.Guid == OwnedBy)
+                    return player.PlayerId;
+
+            return 0;
+        }
+    }
+
     public JobValidator JobValidator { get; set; }
 
     public bool ValidatorRequestSent { get; set; } = false;
@@ -255,26 +280,48 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
         if (viaLoadGame)
             return;
 
+        MarkStateDirty();
+    }
+
+    /// <summary>
+    /// Queues this job's state for broadcast. Taking a job with takenViaLoadGame set stays
+    /// deliberately quiet, which is right for a client restoring its own save but wrong when
+    /// the server hands a job to a player: nobody would hear that it had gone.
+    /// </summary>
+    public void MarkStateDirty()
+    {
         Cause = DirtyCause.JobState;
         OnJobDirty?.Invoke(this);
+    }
+
+    // The owner's job slot frees the moment the job leaves their hands. Host only: ownership
+    // and slot counts live on the server.
+    private void ReleaseFromOwner()
+    {
+        if (OwnedBy == Guid.Empty || !NetworkLifecycle.Instance.IsHost())
+            return;
+
+        foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
+            if (player.Guid == OwnedBy)
+                player.RemoveTakenJob(NetId);
     }
 
     private void OnJobAbandoned(Job job)
     {
-        Cause = DirtyCause.JobState;
-        OnJobDirty?.Invoke(this);
+        ReleaseFromOwner();
+        MarkStateDirty();
     }
 
     private void OnJobCompleted(Job job)
     {
-        Cause = DirtyCause.JobState;
-        OnJobDirty?.Invoke(this);
+        ReleaseFromOwner();
+        MarkStateDirty();
     }
 
     private void OnJobExpired(Job job)
     {
-        Cause = DirtyCause.JobState;
-        OnJobDirty?.Invoke(this);
+        ReleaseFromOwner();
+        MarkStateDirty();
     }
 
     public void AddReport(NetworkedItem item)

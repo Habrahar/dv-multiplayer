@@ -49,7 +49,8 @@ public class ClientboundJobsUpdatePacket
                 FinishTime = job.Job.finishTime,
                 ValidationStationId = validationStationNetId,
                 ItemNetID = validationItemNetId,
-                ItemPositionData = itemPositionData
+                ItemPositionData = itemPositionData,
+                OwnerId = job.OwnerId
             };
 
             jobData.Add(data);

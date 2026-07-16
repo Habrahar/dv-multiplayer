@@ -311,6 +311,44 @@ public class ServerPlayer : IDisposable
         generalLicenses.UnionWith(general ?? StartingGeneralLicenses.ToArray());
         jobLicenses.UnionWith(job ?? StartingJobLicenses.ToArray());
     }
+
+    private bool HasGeneralLicense(GeneralLicenseType license)
+    {
+        GeneralLicenseType_v2 v2 = license.ToV2();
+        return IsHost ? LicenseManager.Instance.IsGeneralLicenseAcquired(v2) : generalLicenses.Contains(v2.id);
+    }
+
+    public bool IsLicensedForJob(JobLicenses required)
+    {
+        if (IsHost)
+            return LicenseManager.Instance.IsLicensedForJob(JobLicenseType_v2.ToV2List(required));
+
+        foreach (JobLicenseType_v2 license in JobLicenseType_v2.ToV2List(required))
+            if (!jobLicenses.Contains(license.id))
+                return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Mirrors LicenseManager.GetNumberOfAllowedConcurrentJobs, which reads the host's licences
+    /// and so cannot answer for anyone else.
+    /// </summary>
+    public int AllowedConcurrentJobs =>
+        HasGeneralLicense(GeneralLicenseType.ConcurrentJobs2) ? int.MaxValue :
+        HasGeneralLicense(GeneralLicenseType.ConcurrentJobs1) ? 2 : 1;
+    #endregion
+
+    #region Jobs
+    // NetIds of the jobs this player has taken and not yet finished. The host's JobsManager
+    // holds every player's jobs because that is what ticks their tasks, so its count cannot
+    // answer "how many does this player have?".
+    private readonly HashSet<ushort> takenJobs = [];
+
+    public int TakenJobCount => takenJobs.Count;
+
+    public void AddTakenJob(ushort jobNetId) => takenJobs.Add(jobNetId);
+    public void RemoveTakenJob(ushort jobNetId) => takenJobs.Remove(jobNetId);
     #endregion
 
     #region Item Ownership

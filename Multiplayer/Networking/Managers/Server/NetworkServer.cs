@@ -2035,7 +2035,7 @@ public class NetworkServer : NetworkManager
         switch (packet.validationType)
         {
             case ValidationType.JobOverview:
-                networkedStationController.JobValidator.ProcessJobOverview(networkedJob.JobOverview.GetTrackedItem<JobOverview>());
+                Server_TakeJob(networkedStationController, networkedJob, player);
                 break;
 
             case ValidationType.JobBooklet:
@@ -2047,6 +2047,58 @@ public class NetworkServer : NetworkManager
         }
 
         //SendPacket(peer, new ClientboundJobValidateResponsePacket { JobNetId = packet.JobNetId, Invalid = false }, DeliveryMethod.ReliableUnordered);
+    }
+
+    /// <summary>
+    /// Hands a job to the player who asked for it. Vanilla's ProcessJobOverview cannot be used
+    /// here: it judges the host - the host's licences, the host's job slots - and prints the
+    /// booklet on the host's printer, which is how a client taking a job used to leave paper
+    /// on the host's desk and count against the host's limit.
+    /// </summary>
+    private void Server_TakeJob(NetworkedStationController netStation, NetworkedJob netJob, ServerPlayer player)
+    {
+        JobOverview overview = netJob.JobOverview?.GetTrackedItem<JobOverview>();
+        Job job = netJob.Job;
+
+        if (overview == null || job == null || job.State != JobState.Available)
+        {
+            LogWarning($"Server_TakeJob() {player.Username} tried to take job {netJob.NetId}, which is not available to take");
+            return;
+        }
+
+        // First one through wins; the losers never see it offered again.
+        if (netJob.OwnedBy != Guid.Empty)
+        {
+            LogWarning($"Server_TakeJob() {player.Username} tried to take job {job.ID}, already taken");
+            return;
+        }
+
+        if (!player.IsLicensedForJob(job.requiredLicenses))
+        {
+            LogWarning($"Server_TakeJob() {player.Username} tried to take job {job.ID} without the licences for it");
+            return;
+        }
+
+        if (player.TakenJobCount >= player.AllowedConcurrentJobs)
+        {
+            LogWarning($"Server_TakeJob() {player.Username} tried to take job {job.ID} with no free job slots");
+            return;
+        }
+
+        netJob.OwnedBy = player.Guid;
+        player.AddTakenJob(netJob.NetId);
+
+        // The host's JobsManager holds every job regardless of owner: its Update is what ticks
+        // their tasks, and CompleteTheJob throws for anything it does not hold. Taking it as if
+        // loaded from a save keeps the host's debt controller out of someone else's job - and
+        // silences the dirty flag with it, hence marking the state by hand.
+        JobsManager.Instance.TakeJob(job, true);
+        netJob.MarkStateDirty();
+
+        netStation.StationController.spawnedJobOverviews.Remove(overview);
+        overview.DestroyJobOverview();
+
+        Log($"Server_TakeJob() {job.ID} taken by {player.Username}");
     }
 
     private void OnServerboundWarehouseMachineControllerRequestPacket(ServerboundWarehouseMachineControllerRequestPacket packet, ITransportPeer peer)

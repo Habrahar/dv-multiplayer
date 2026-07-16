@@ -15,6 +15,13 @@ public struct JobUpdateStruct : INetSerializable
     public uint ValidationStationId;
     public ItemPositionData ItemPositionData;
 
+    /// <summary>
+    /// Who took this job, or 0 for nobody and for an owner who is not currently connected.
+    /// A receiving client compares it with its own PlayerId to decide whether the job is
+    /// theirs to work, or just one to stop offering.
+    /// </summary>
+    public byte OwnerId;
+
     public readonly void Serialize(NetDataWriter writer)
     {
         writer.Put(JobNetID);
@@ -29,6 +36,7 @@ public struct JobUpdateStruct : INetSerializable
         writer.Put(FinishTime);
         writer.Put(ItemNetID);
         writer.Put(ValidationStationId);
+        writer.Put(OwnerId);
         ItemPositionData.Serialize(writer,ItemPositionData);
     }
 
@@ -45,6 +53,7 @@ public struct JobUpdateStruct : INetSerializable
         FinishTime = reader.GetFloat();
         ItemNetID = reader.GetUShort();
         ValidationStationId = reader.GetUInt();
+        OwnerId = reader.GetByte();
         ItemPositionData = ItemPositionData.Deserialize(reader);
     }
 }

@@ -27,6 +27,13 @@ public class JobData
     public ushort ItemNetID { get; set; }
     public ItemPositionData ItemPosition { get; set; }
 
+    /// <summary>
+    /// Who holds this job, or 0 for nobody and for an owner who is away. A joining client
+    /// compares it with its own PlayerId: without it, everyone arriving would pick up every
+    /// job already in progress, including other players'.
+    /// </summary>
+    public byte OwnerId { get; set; }
+
     public static JobData FromJob(NetworkedJob networkedJob)
     {
         Job job = networkedJob.Job;
@@ -76,6 +83,7 @@ public class JobData
             TimeLimit = job.TimeLimit,
             ItemNetID = itemNetId,
             ItemPosition = itemPos,
+            OwnerId = networkedJob.OwnerId,
         };
     }
 
@@ -145,6 +153,7 @@ public class JobData
         writer.Put((byte)data.State);
         writer.Put(data.TimeLimit);
         writer.Put(data.ItemNetID);
+        writer.Put(data.OwnerId);
         ItemPositionData.Serialize(writer, data.ItemPosition);
     }
 
@@ -198,6 +207,7 @@ public class JobData
             JobState state = (JobState)reader.GetByte();
             float timeLimit = reader.GetFloat();
             ushort itemNetId = reader.GetUShort();
+            byte ownerId = reader.GetByte();
             ItemPositionData itemPositionData = ItemPositionData.Deserialize(reader);
 
             return new JobData
@@ -214,6 +224,7 @@ public class JobData
                 State = state,
                 TimeLimit = timeLimit,
                 ItemNetID = itemNetId,
+                OwnerId = ownerId,
                 ItemPosition = itemPositionData
             };
         }

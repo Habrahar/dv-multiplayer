@@ -350,7 +350,11 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
             StationController.processedNewJobs.Add(newJob);
 
             takenJobs.Add(newJob);
-            newJob.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
+
+            // Only pick the job back up if it is ours: a job in progress belongs to whoever
+            // took it, and arriving should not hand us everyone else's work.
+            if (jobData.OwnerId != 0 && jobData.OwnerId == NetworkLifecycle.Instance.Client.PlayerId)
+                newJob.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
         }
         else
         {
@@ -463,8 +467,13 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
 
         NetworkLifecycle.Instance.Client.LogDebug(() => $"HandleJobStateChange({jobIdStr}) Current state: {netJob?.Job?.State}, New state: {updateData.JobState}, ValidationStationNetId: {updateData.ValidationStationId}, ItemNetId: {updateData.ItemNetID}");
 
-        bool shouldPrint = updateData.JobState == JobState.InProgress || updateData.JobState == JobState.Completed;
-        bool canPrint = true;
+        // Everyone reacts to a job being taken - it leaves the available list and its overview
+        // is destroyed, out of a player's hands if need be. Only its owner works it: taking it
+        // into JobsManager is what starts its tasks, and only they get the paperwork.
+        bool isMine = updateData.OwnerId != 0 && updateData.OwnerId == NetworkLifecycle.Instance.Client.PlayerId;
+
+        bool shouldPrint = isMine && (updateData.JobState == JobState.InProgress || updateData.JobState == JobState.Completed);
+        bool canPrint = shouldPrint;
 
         if (shouldPrint)
         {
@@ -493,7 +502,8 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
                 availableJobs.Remove(netJob.Job);
                 takenJobs.Add(netJob.Job);
 
-                netJob.Job.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
+                if (isMine)
+                    netJob.Job.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
 
                 if (canPrint)
                 {
@@ -511,7 +521,11 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
             case JobState.Completed:
                 takenJobs.Remove(netJob.Job);
                 completedJobs.Add(netJob.Job);
-                netJob.Job.CompleteJob();
+
+                // CompleteJob fires JobCompleted, which the debt controller listens to. Only
+                // the owner ever started this job, so only they may finish it.
+                if (isMine)
+                    netJob.Job.CompleteJob();
 
                 if (canPrint)
                 {
@@ -532,7 +546,10 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
             case JobState.Abandoned:
                 takenJobs.Remove(netJob.Job);
                 abandonedJobs.Add(netJob.Job);
-                netJob.Job.AbandonJob();
+
+                if (isMine)
+                    netJob.Job.AbandonJob();
+
                 StartCoroutine(UpdateCarPlates(netJob.JobCars, string.Empty));
                 break;
 

@@ -1,4 +1,6 @@
+using System;
 using System.Collections;
+using DV.Logic.Job;
 using DV.ThingTypes;
 using HarmonyLib;
 using Multiplayer.Components.Networking;
@@ -47,8 +49,10 @@ public static class JobValidator_Patch
 
     [HarmonyPatch(nameof(JobValidator.ProcessJobOverview))]
     [HarmonyPrefix]
-    private static bool ProcessJobOverview(JobValidator __instance, JobOverview jobOverview)
+    private static bool ProcessJobOverview(JobValidator __instance, JobOverview jobOverview, out Job __state)
     {
+        // Vanilla destroys the overview on the way out, so remember the job for the postfix.
+        __state = jobOverview?.job;
 
         if(__instance.bookletPrinter.IsOnCooldown)
         {
@@ -75,6 +79,31 @@ public static class JobValidator_Patch
             SendValidationRequest(__instance, networkedJob, ValidationType.JobOverview);
 
         return false;
+    }
+
+    // The host takes jobs through vanilla, which judges it correctly - they are the host, so
+    // the singletons it consults really are theirs. All that is missing is naming the owner,
+    // and only once vanilla has agreed to hand it over.
+    [HarmonyPatch(nameof(JobValidator.ProcessJobOverview))]
+    [HarmonyPostfix]
+    private static void ProcessJobOverview_Postfix(Job __state)
+    {
+        if (__state == null || !NetworkLifecycle.Instance.IsHost())
+            return;
+
+        if (__state.State != JobState.InProgress)
+            return;
+
+        if (!NetworkedJob.TryGetFromJob(__state, out NetworkedJob networkedJob) || networkedJob.OwnedBy != Guid.Empty)
+            return;
+
+        ServerPlayer host = HostPlayer();
+
+        if (host == null)
+            return;
+
+        networkedJob.OwnedBy = host.Guid;
+        host.AddTakenJob(networkedJob.NetId);
     }
 
 
