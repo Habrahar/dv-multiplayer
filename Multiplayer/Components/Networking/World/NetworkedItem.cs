@@ -93,8 +93,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     //Host only: a thrown or dropped item keeps moving after the state change, and nobody
     //re-reports where it stopped - every copy would come to rest somewhere else. Watch for
-    //the rigidbody falling asleep and send one final position.
+    //the rigidbody falling asleep and send one final position. A body that has not started
+    //moving yet also reads as asleep, so wait until physics has visibly taken over; the
+    //timeout covers an item that never wakes, or one that never rests (say, on a rolling car).
+    private const uint SETTLE_TIMEOUT_TICKS = 5 * NetworkLifecycle.TICK_RATE;
     private bool settleWatch;
+    private bool settleSeenMoving;
+    private uint settleWatchTick;
     private bool settleSyncDue;
 
     private Vector3 thrownPosition;
@@ -295,6 +300,42 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     #endregion
 
+    private void ArmSettleWatch()
+    {
+        settleWatch = true;
+        settleSeenMoving = false;
+        settleWatchTick = NetworkLifecycle.Instance.Tick;
+    }
+
+    //Decide whether the item has come to rest, and if so queue the one position everyone adopts.
+    private void CheckSettled()
+    {
+        Rigidbody rb = Item.ItemRigidbody;
+
+        //nothing to wait for - it cannot move on its own, so the position already sent stands
+        if (rb == null)
+        {
+            settleWatch = false;
+            return;
+        }
+
+        bool atRest = rb.IsSleeping();
+        bool timedOut = NetworkLifecycle.Instance.Tick - settleWatchTick >= SETTLE_TIMEOUT_TICKS;
+
+        if (!atRest)
+            settleSeenMoving = true;
+
+        //asleep before physics ever took over means the throw has yet to start, not that it ended
+        if (!timedOut && !(atRest && settleSeenMoving))
+            return;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.CheckSettled() netId: {NetId}, name: {name} came to rest at {transform.position}, sleeping: {atRest}, timed out: {timedOut}");
+
+        settleWatch = false;
+        wasThrown = false;  //report where it lies, not where it flew from
+        settleSyncDue = true;
+    }
+
     public ItemUpdateData GetSnapshot()
     {
         ItemUpdateData snapshot;
@@ -305,13 +346,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (Item == null && Register() == false)
             return null;
 
-        if (settleWatch && (lastState == ItemState.Dropped || lastState == ItemState.Thrown) &&
-            Item.ItemRigidbody != null && Item.ItemRigidbody.IsSleeping())
-        {
-            settleWatch = false;
-            wasThrown = false;  //report where it lies, not where it flew from
-            settleSyncDue = true;
-        }
+        if (settleWatch && (lastState == ItemState.Dropped || lastState == ItemState.Thrown))
+            CheckSettled();
 
         if (!stateDirty && !hasDirtyVals && !settleSyncDue)
             return null;
@@ -346,7 +382,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //arm the settle watch on a fresh transition into a free-moving state (host judges rest)
         if (NetworkLifecycle.Instance.IsHost() && lastState != currentState &&
             (currentState == ItemState.Dropped || currentState == ItemState.Thrown))
-            settleWatch = true;
+            ArmSettleWatch();
 
         lastState = currentState;
         LastDirtyTick = NetworkLifecycle.Instance.Tick;
@@ -414,7 +450,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             //a client threw or dropped it: the host's physics now decides where it comes to rest
             if (NetworkLifecycle.Instance.IsHost() &&
                 (snapshot.ItemState == ItemState.Dropped || snapshot.ItemState == ItemState.Thrown))
-                settleWatch = true;
+                ArmSettleWatch();
         }
 
         if (snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.Create) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.ObjectState))
@@ -590,6 +626,16 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         transform.position = snapshot.ItemPosition + WorldMover.currentMove;
         transform.rotation = snapshot.ItemRotation;
         OwnerId = 0;
+
+        //A throw is replayed as GrabHandlerItem.Throw -> AddForce, which adds to whatever the
+        //body was already doing. On the thrower the item leaves the hand at rest, so any
+        //leftover motion here would send it somewhere else entirely. Start from the same rest.
+        Rigidbody rb = Item.ItemRigidbody;
+        if (rb != null && !rb.isKinematic)
+        {
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
 
         //handle throwing of the item
         if (snapshot.ItemState == ItemState.Thrown)

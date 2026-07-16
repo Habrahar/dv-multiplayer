@@ -247,7 +247,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
                     //prevent propagation of creates for special items
                     //(GetType() here would always be NetworkedItem - the paper types live in TrackedItemType)
-                    if(!DoNotCreateItem(nearbyItem.TrackedItemType))
+                    if(snapshot != null && !DoNotCreateItem(nearbyItem.TrackedItemType))
                         playerUpdates.Add(snapshot);
                 }
                 else
