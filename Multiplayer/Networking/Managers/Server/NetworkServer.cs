@@ -2003,6 +2003,7 @@ public class NetworkServer : NetworkManager
     // balance along with the refusal, or the client stays short until its next money event.
     private void DenyLicensePurchase(uint ticketId, ServerPlayer player, ITransportPeer peer, LicensePurchaseResponse.ResponseType reason)
     {
+        Multiplayer.Log($"[Diag] Licences: refused {player.Username}'s purchase - {reason}. Returning their authoritative balance of ${player.Money}");
         SendRpcResponse(ticketId, new LicensePurchaseResponse { Response = reason }, peer);
         SendMoney(player);
     }
@@ -2062,26 +2063,26 @@ public class NetworkServer : NetworkManager
 
         if (overview == null || job == null || job.State != JobState.Available)
         {
-            LogWarning($"Server_TakeJob() {player.Username} tried to take job {netJob.NetId}, which is not available to take");
+            LogWarning($"[Diag] Jobs: refused {player.Username} job {netJob.NetId} - not available");
             return;
         }
 
         // First one through wins; the losers never see it offered again.
         if (netJob.OwnedBy != Guid.Empty)
         {
-            LogWarning($"Server_TakeJob() {player.Username} tried to take job {job.ID}, already taken");
+            LogWarning($"[Diag] Jobs: refused {player.Username} job {job.ID} - already taken by someone else");
             return;
         }
 
         if (!player.IsLicensedForJob(job.requiredLicenses))
         {
-            LogWarning($"Server_TakeJob() {player.Username} tried to take job {job.ID} without the licences for it");
+            LogWarning($"[Diag] Jobs: refused {player.Username} job {job.ID} - THEIR licences do not cover it ({job.requiredLicenses})");
             return;
         }
 
         if (player.TakenJobCount >= player.AllowedConcurrentJobs)
         {
-            LogWarning($"Server_TakeJob() {player.Username} tried to take job {job.ID} with no free job slots");
+            LogWarning($"[Diag] Jobs: refused {player.Username} job {job.ID} - no free slots ({player.TakenJobCount}/{player.AllowedConcurrentJobs})");
             return;
         }
 
@@ -2098,7 +2099,7 @@ public class NetworkServer : NetworkManager
         netStation.StationController.spawnedJobOverviews.Remove(overview);
         overview.DestroyJobOverview();
 
-        Log($"Server_TakeJob() {job.ID} taken by {player.Username}");
+        Log($"[Diag] Jobs: {job.ID} taken by {player.Username} ({player.TakenJobCount}/{player.AllowedConcurrentJobs} slots). No booklet printed on the host");
     }
 
     private void OnServerboundWarehouseMachineControllerRequestPacket(ServerboundWarehouseMachineControllerRequestPacket packet, ITransportPeer peer)

@@ -499,7 +499,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             }
         }
 
-        Multiplayer.Log($"[ItemDiag] CacheWorldItems() saw {seen} items, cached {cached}. Skipped: {essential} essential, {grabbed} grabbed, {inInventory} in inventory, {noItemBase} with no ItemBase.");
+        Multiplayer.Log($"[Diag] Items: CacheWorldItems() saw {seen} items, cached {cached}. Skipped: {essential} essential, {grabbed} grabbed, {inInventory} in inventory, {noItemBase} with no ItemBase.");
 
         ClientInitialised = true;
     }
@@ -521,7 +521,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             return;
 
         lastLateReport = Time.time;
-        Multiplayer.Log($"[ItemDiag] {lateItems} item(s) have appeared since CacheWorldItems ran. Newest: {item?.InventorySpecs?.itemPrefabName ?? "?"}");
+        Multiplayer.Log($"[Diag] Items: {lateItems} item(s) have appeared since CacheWorldItems ran. Newest: {item?.InventorySpecs?.itemPrefabName ?? "?"}");
     }
 
     private NetworkedItem GetFromCache(string prefabName)

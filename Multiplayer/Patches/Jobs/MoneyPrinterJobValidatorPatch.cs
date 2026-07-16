@@ -28,7 +28,7 @@ public static class MoneyPrinterJobValidator_Patch
 
         float wage = job.GetWageForTheJob();
         submitter.AddMoney(wage);
-        Multiplayer.LogDebug(() => $"PrintPayment() Paid {wage} for job {job?.ID} to {submitter.Username}");
+        Multiplayer.Log($"[Diag] Pay: job {job?.ID} paid ${wage} straight into {submitter.Username}'s wallet (now ${submitter.Money}). No banknotes printed");
 
         return false;
     }

@@ -353,7 +353,11 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
 
             // Only pick the job back up if it is ours: a job in progress belongs to whoever
             // took it, and arriving should not hand us everyone else's work.
-            if (jobData.OwnerId != 0 && jobData.OwnerId == NetworkLifecycle.Instance.Client.PlayerId)
+            bool mineOnJoin = jobData.OwnerId != 0 && jobData.OwnerId == NetworkLifecycle.Instance.Client.PlayerId;
+
+            Multiplayer.Log($"[Diag] Jobs: joining onto in-progress {jobData.ID}, owner id {jobData.OwnerId}, mine: {mineOnJoin}");
+
+            if (mineOnJoin)
                 newJob.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
         }
         else
@@ -471,6 +475,8 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
         // is destroyed, out of a player's hands if need be. Only its owner works it: taking it
         // into JobsManager is what starts its tasks, and only they get the paperwork.
         bool isMine = updateData.OwnerId != 0 && updateData.OwnerId == NetworkLifecycle.Instance.Client.PlayerId;
+
+        Multiplayer.Log($"[Diag] Jobs: {netJob.Job?.ID} -> {updateData.JobState}, owner id {updateData.OwnerId}, mine: {isMine}. {(isMine ? "Taking it and printing" : "Dropping the overview only")}");
 
         bool shouldPrint = isMine && (updateData.JobState == JobState.InProgress || updateData.JobState == JobState.Completed);
         bool canPrint = shouldPrint;

@@ -288,6 +288,7 @@ public class ServerPlayer : IDisposable
         if (IsHost || !generalLicenses.Add(id))
             return false;
 
+        Multiplayer.Log($"[Diag] Licences: general '{id}' granted to {Username} only");
         NetworkLifecycle.Instance.Server.SendLicense(this, id, false);
         return true;
     }
@@ -297,6 +298,7 @@ public class ServerPlayer : IDisposable
         if (IsHost || !jobLicenses.Add(id))
             return false;
 
+        Multiplayer.Log($"[Diag] Licences: job '{id}' granted to {Username} only");
         NetworkLifecycle.Instance.Server.SendLicense(this, id, true);
         return true;
     }
@@ -308,8 +310,12 @@ public class ServerPlayer : IDisposable
         generalLicenses.Clear();
         jobLicenses.Clear();
 
+        bool firstTime = general == null && job == null;
+
         generalLicenses.UnionWith(general ?? StartingGeneralLicenses.ToArray());
         jobLicenses.UnionWith(job ?? StartingJobLicenses.ToArray());
+
+        Multiplayer.Log($"[Diag] Licences: {Username} joins {(firstTime ? "for the first time, with the starting set" : "with their saved licences")} - general [{string.Join(", ", generalLicenses)}], job [{string.Join(", ", jobLicenses)}], ${Money}");
     }
 
     private bool HasGeneralLicense(GeneralLicenseType license)
