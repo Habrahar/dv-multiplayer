@@ -4,7 +4,9 @@ using HarmonyLib;
 using Multiplayer.Components.Networking;
 using Multiplayer.Components.Networking.Jobs;
 using Multiplayer.Components.Networking.World;
+using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Jobs;
+using Multiplayer.Networking.Managers.Server;
 using UnityEngine;
 
 namespace Multiplayer.Patches.Jobs;
@@ -13,6 +15,26 @@ namespace Multiplayer.Patches.Jobs;
 public static class JobValidator_Patch
 {
     private const float TIME_OUT = 3f;
+
+    /// <summary>
+    /// Who handed in the booklet ValidateJob is currently working on, or null outside such
+    /// a call. A client's booklet reaches the validator through the server, so by the time
+    /// the payout runs there is nothing left tying the money to a player. Read by
+    /// <see cref="MoneyPrinterJobValidator_Patch"/>.
+    /// </summary>
+    public static ServerPlayer JobSubmitter { get; private set; }
+
+    // Called by the server before it validates a booklet on a client's behalf.
+    public static void SetJobSubmitter(ServerPlayer player)
+    {
+        JobSubmitter = player;
+    }
+
+    private static ServerPlayer HostPlayer()
+    {
+        NetworkServer server = NetworkLifecycle.Instance.Server;
+        return server != null && server.TryGetServerPlayer(server.SelfId, out ServerPlayer player) ? player : null;
+    }
 
     [HarmonyPatch(nameof(JobValidator.Start))]
     [HarmonyPostfix]
@@ -78,6 +100,10 @@ public static class JobValidator_Patch
         {
             NetworkLifecycle.Instance.Server.Log($"Validating Job {jobBooklet?.job?.ID}");
             networkedJob.JobValidator = __instance;
+
+            // The server names the submitter before validating on a client's behalf.
+            // Nothing set means the host fed this validator itself.
+            JobSubmitter ??= HostPlayer();
             return true;
         }
 
@@ -85,6 +111,15 @@ public static class JobValidator_Patch
             SendValidationRequest(__instance, networkedJob, ValidationType.JobBooklet);
 
         return false;
+    }
+
+    // Runs even when the prefix skipped the original, so the submitter never outlives the
+    // call that set it.
+    [HarmonyPatch(nameof(JobValidator.ValidateJob))]
+    [HarmonyPostfix]
+    private static void ValidateJob_Postfix()
+    {
+        JobSubmitter = null;
     }
 
     private static void SendValidationRequest(JobValidator validator,NetworkedJob netJob, ValidationType type)

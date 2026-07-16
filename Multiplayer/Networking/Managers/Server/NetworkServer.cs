@@ -38,6 +38,7 @@ using Multiplayer.Networking.Packets.Serverbound.Jobs;
 using Multiplayer.Networking.Packets.Serverbound.Train;
 using Multiplayer.Networking.Packets.Unconnected;
 using Multiplayer.Networking.TransportLayers;
+using Multiplayer.Patches.Jobs;
 using Multiplayer.Patches.MainMenu;
 using Multiplayer.Patches.World;
 using Multiplayer.Utils;
@@ -2028,6 +2029,9 @@ public class NetworkServer : NetworkManager
                 break;
 
             case ValidationType.JobBooklet:
+                // Name the submitter so the payout lands in their wallet rather than the
+                // host's; the validator patch clears it once the call is done.
+                JobValidator_Patch.SetJobSubmitter(player);
                 networkedStationController.JobValidator.ValidateJob(networkedJob.JobBooklet.GetTrackedItem<JobBooklet>());
                 break;
         }
