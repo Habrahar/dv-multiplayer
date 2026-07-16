@@ -4,6 +4,7 @@ using DV.Logic.Job;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Jobs;
+using Multiplayer.Networking.Packets.Clientbound.Jobs;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -156,6 +157,9 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
     public bool ValidatorRequestSent { get; set; } = false;
     public bool ValidatorResponseReceived { get; set; } = false;
     public bool ValidationAccepted { get; set; } = false;
+
+    /// <summary>Why the server refused, so the validator can print it rather than just beep.</summary>
+    public ClientboundJobValidateResponsePacket.RefusalReason RefusalReason { get; set; } = ClientboundJobValidateResponsePacket.RefusalReason.Accepted;
     public ValidationType ValidationType { get; set; }
 
     public DirtyCause Cause { get; private set; }

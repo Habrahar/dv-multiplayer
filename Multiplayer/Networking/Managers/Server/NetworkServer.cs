@@ -2052,6 +2052,24 @@ public class NetworkServer : NetworkManager
     }
 
     /// <summary>
+    /// Tells the asker why they cannot have the job. The host is the only one who knows - it
+    /// judged their licences and their slots - and staying silent left them watching their
+    /// validator time out with nothing but an error sound to go on (B8).
+    /// </summary>
+    private void DenyJob(ServerPlayer player, ushort jobNetId, ClientboundJobValidateResponsePacket.RefusalReason reason)
+    {
+        if (player.Peer == null)
+            return;
+
+        SendPacket(player.Peer, new ClientboundJobValidateResponsePacket
+        {
+            JobNetId = jobNetId,
+            Invalid = false,
+            Reason = reason
+        }, DeliveryMethod.ReliableOrdered);
+    }
+
+    /// <summary>
     /// Hands a job to the player who asked for it. Vanilla's ProcessJobOverview cannot be used
     /// here: it judges the host - the host's licences, the host's job slots - and prints the
     /// booklet on the host's printer, which is how a client taking a job used to leave paper
@@ -2065,6 +2083,7 @@ public class NetworkServer : NetworkManager
         if (overview == null || job == null || job.State != JobState.Available)
         {
             LogWarning($"[Diag] Jobs: refused {player.Username} job {netJob.NetId} - not available");
+            DenyJob(player, netJob.NetId, ClientboundJobValidateResponsePacket.RefusalReason.NotAvailable);
             return;
         }
 
@@ -2072,18 +2091,21 @@ public class NetworkServer : NetworkManager
         if (netJob.OwnerId != 0)
         {
             LogWarning($"[Diag] Jobs: refused {player.Username} job {job.ID} - already taken by someone else");
+            DenyJob(player, netJob.NetId, ClientboundJobValidateResponsePacket.RefusalReason.AlreadyTaken);
             return;
         }
 
         if (!player.IsLicensedForJob(job.requiredLicenses))
         {
             LogWarning($"[Diag] Jobs: refused {player.Username} job {job.ID} - THEIR licences do not cover it ({job.requiredLicenses})");
+            DenyJob(player, netJob.NetId, ClientboundJobValidateResponsePacket.RefusalReason.LicencesMissing);
             return;
         }
 
         if (player.TakenJobCount >= player.AllowedConcurrentJobs)
         {
             LogWarning($"[Diag] Jobs: refused {player.Username} job {job.ID} - no free slots ({player.TakenJobCount}/{player.AllowedConcurrentJobs})");
+            DenyJob(player, netJob.NetId, ClientboundJobValidateResponsePacket.RefusalReason.NoFreeSlots);
             return;
         }
 

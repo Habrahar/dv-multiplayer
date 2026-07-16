@@ -97,6 +97,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     //moving yet also reads as asleep, so wait until physics has visibly taken over; the
     //timeout covers an item that never wakes, or one that never rests (say, on a rolling car).
     private const uint SETTLE_TIMEOUT_TICKS = 5 * NetworkLifecycle.TICK_RATE;
+    private const float REST_SPEED_SQR = 0.01f;  //0.1 m/s relative to whatever carries it
+    private const float REST_SPIN_SQR = 0.05f;
     private bool settleWatch;
     private bool settleSeenMoving;
     private uint settleWatchTick;
@@ -228,7 +230,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         }
 
         throwDirection = direction;
-        thrownPosition = Item.transform.position - WorldMover.currentMove;
+        thrownPosition = Item.transform.position;   //raw world; CreateUpdateData picks the frame
         thrownRotation = Item.transform.rotation;
 
         //Multiplayer.LogDebug(() => $"NetworkedItem.OnThrow() netId: {NetId}, Name: {name}, Raw Position: {Item.transform.position}, Position: {thrownPosition}, Rotation: {thrownRotation}, Direction: {throwDirection}");
@@ -342,6 +344,23 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         settleWatchTick = NetworkLifecycle.Instance.Tick;
     }
 
+    // Unity sleeps a body that has stopped moving through the world, which an item riding a
+    // train never does - it would keep the watch armed until it timed out. On a car, rest means
+    // rest *relative to the car*: that is what "it stopped rolling around the cab" is.
+    private bool IsAtRest(Rigidbody rb)
+    {
+        if (rb.IsSleeping())
+            return true;
+
+        TrainCar car = TrainCar.Resolve(transform);
+
+        if (car == null || car.rb == null)
+            return false;
+
+        return (rb.velocity - car.rb.velocity).sqrMagnitude < REST_SPEED_SQR
+            && rb.angularVelocity.sqrMagnitude < REST_SPIN_SQR;
+    }
+
     //Decide whether the item has come to rest, and if so queue the one position everyone adopts.
     private void CheckSettled()
     {
@@ -354,7 +373,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return;
         }
 
-        bool atRest = rb.IsSleeping();
+        bool atRest = IsAtRest(rb);
         bool timedOut = NetworkLifecycle.Instance.Tick - settleWatchTick >= SETTLE_TIMEOUT_TICKS;
 
         if (!atRest)
@@ -516,6 +535,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         Vector3 position;
         Quaternion rotation;
+        Vector3 direction = throwDirection;
         Dictionary<string, object> states;
         ushort carId = 0;
         bool frontCoupler = true;
@@ -527,8 +547,36 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         }
         else
         {
-            position = transform.position - WorldMover.currentMove;
+            position = transform.position;
             rotation = transform.rotation;
+        }
+
+        // An item riding a car has to be described relative to that car. A world position is
+        // already wrong by the time it arrives - the train moved, and the receiver's copy of the
+        // car is interpolating somewhere else again. Players inside a car are tracked this way
+        // already (ServerPlayer.WorldPosition); items were not (B20).
+        if (lastState == ItemState.Dropped || lastState == ItemState.Thrown)
+        {
+            TrainCar restingCar = TrainCar.Resolve(transform);
+
+            if (restingCar != null)
+            {
+                carId = restingCar.GetNetId();
+
+                if (carId != 0)
+                {
+                    position = restingCar.transform.InverseTransformPoint(position);
+                    rotation = Quaternion.Inverse(restingCar.transform.rotation) * rotation;
+                    direction = restingCar.transform.InverseTransformDirection(direction);
+                }
+            }
+
+            if (carId == 0)
+                position -= WorldMover.currentMove;
+        }
+        else
+        {
+            position -= WorldMover.currentMove;
         }
 
         if (updateType.HasFlag(ItemUpdateData.ItemUpdateType.Create) || updateType.HasFlag(ItemUpdateData.ItemUpdateType.FullSync))
@@ -559,7 +607,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             ItemState = lastState,
             ItemPosition = position,
             ItemRotation = rotation,
-            ThrowDirection = throwDirection,
+            ThrowDirection = direction,
             CarNetId = carId,
             AttachedFront = frontCoupler,
             States = states,
@@ -663,10 +711,32 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //would teleport it to the *local* player.
         Inventory.Instance.ReturnItemToWorld(gameObject, false);
 
+        //Resolve the frame the sender described this in. A car's own position is read now, not
+        //when the packet was sent, so the item lands where it belongs in the cab however far the
+        //train has travelled since (B20).
+        Vector3 worldPosition;
+        Quaternion worldRotation;
+        Vector3 worldThrow = snapshot.ThrowDirection;
+
+        if (snapshot.CarNetId != 0 && NetworkedTrainCar.TryGet(snapshot.CarNetId, out TrainCar restingCar) && restingCar != null)
+        {
+            worldPosition = restingCar.transform.TransformPoint(snapshot.ItemPosition);
+            worldRotation = restingCar.transform.rotation * snapshot.ItemRotation;
+            worldThrow = restingCar.transform.TransformDirection(snapshot.ThrowDirection);
+        }
+        else
+        {
+            if (snapshot.CarNetId != 0)
+                Multiplayer.LogWarning($"NetworkedItem.HandleDroppedOrThrownState() netId: {NetId}, car {snapshot.CarNetId} not found; placing in world space instead");
+
+            worldPosition = snapshot.ItemPosition + WorldMover.currentMove;
+            worldRotation = snapshot.ItemRotation;
+        }
+
         //activate and relocate item
         gameObject.SetActive(true);
-        transform.position = snapshot.ItemPosition + WorldMover.currentMove;
-        transform.rotation = snapshot.ItemRotation;
+        transform.position = worldPosition;
+        transform.rotation = worldRotation;
         OwnerId = 0;
 
         //A throw is replayed as GrabHandlerItem.Throw -> AddForce, which adds to whatever the
@@ -682,16 +752,16 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //handle throwing of the item
         if (snapshot.ItemState == ItemState.Thrown)
         {
-            Multiplayer.LogDebug(() => $"NetworkedItem.HandleDroppedOrThrownState() ItemNetId: {snapshot?.ItemNetId} Thrown. Position: {transform.position}, Direction: {snapshot?.ThrowDirection}");
+            Multiplayer.LogDebug(() => $"NetworkedItem.HandleDroppedOrThrownState() ItemNetId: {snapshot?.ItemNetId} Thrown. Position: {transform.position}, Direction: {worldThrow}, Car: {snapshot?.CarNetId}");
 
-            //keep the direction: OnThrow's echo guard returns before recording it, so without
-            //this the host would relay someone else's throw with a stale direction
-            throwDirection = snapshot.ThrowDirection;
-            thrownPosition = snapshot.ItemPosition;
-            thrownRotation = snapshot.ItemRotation;
+            //keep the throw in world terms: OnThrow's echo guard returns before recording it, so
+            //without this the host would relay someone else's throw with a stale direction
+            throwDirection = worldThrow;
+            thrownPosition = worldPosition;
+            thrownRotation = worldRotation;
 
             wasThrown = true;
-            grabHandler?.Throw(snapshot.ThrowDirection);
+            grabHandler?.Throw(worldThrow);
         }
         else
         {

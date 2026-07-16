@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
+using DV.Booklets;
 using DV.Logic.Job;
+using DV.Printers;
 using DV.ThingTypes;
 using HarmonyLib;
 using Multiplayer.Components.Networking;
@@ -9,6 +11,7 @@ using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Jobs;
 using Multiplayer.Networking.Managers.Server;
+using Multiplayer.Networking.Packets.Clientbound.Jobs;
 using UnityEngine;
 
 namespace Multiplayer.Patches.Jobs;
@@ -205,12 +208,52 @@ public static class JobValidator_Patch
 
         if(!received || !accepted)
         {
-            validator.bookletPrinter.PlayErrorSound();
+            PrintRefusal(validator, networkedJob, received);
         }
 
         networkedJob.ValidatorRequestSent = false;
         networkedJob.ValidatorResponseReceived = false;
         networkedJob.ValidationAccepted = false;
+        networkedJob.RefusalReason = ClientboundJobValidateResponsePacket.RefusalReason.Accepted;
+    }
 
+    /// <summary>
+    /// Prints the same report vanilla prints when it refuses a job itself. Vanilla builds it from
+    /// the job, so it names the licences that are missing - we only have to say which case it is.
+    /// A refusal we timed out on says nothing, so it keeps the bare error sound.
+    /// </summary>
+    private static void PrintRefusal(JobValidator validator, NetworkedJob networkedJob, bool received)
+    {
+        PrinterController printer = validator.bookletPrinter;
+
+        if (!received || networkedJob.Job == null)
+        {
+            printer.PlayErrorSound();
+            return;
+        }
+
+        switch (networkedJob.RefusalReason)
+        {
+            // Vanilla's own mapping (JobValidator.ProcessJobOverview): the same report covers
+            // both, and the flag is what tells them apart on the page.
+            case ClientboundJobValidateResponsePacket.RefusalReason.LicencesMissing:
+                BookletCreator.CreateMissingLicenseReport(networkedJob.Job, true, printer.spawnAnchor.position, printer.spawnAnchor.rotation, WorldMover.OriginShiftParent);
+                break;
+
+            case ClientboundJobValidateResponsePacket.RefusalReason.NoFreeSlots:
+                BookletCreator.CreateMissingLicenseReport(networkedJob.Job, false, printer.spawnAnchor.position, printer.spawnAnchor.rotation, WorldMover.OriginShiftParent);
+                break;
+
+            // Vanilla has no paper for these - it cannot happen on your own: nobody else exists
+            // to take the job first.
+            default:
+                printer.PlayErrorSound();
+                return;
+        }
+
+        Multiplayer.Log($"[Diag] Jobs: {networkedJob.Job.ID} refused - {networkedJob.RefusalReason}. Printing the report");
+
+        printer.PlayErrorSound();
+        printer.Print();
     }
 }

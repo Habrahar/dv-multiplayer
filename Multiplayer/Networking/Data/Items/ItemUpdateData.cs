@@ -50,6 +50,10 @@ public class ItemUpdateData
         {
             if (ItemState == ItemState.Dropped || ItemState == ItemState.Thrown) // || UpdateType.HasFlag(ItemUpdateType.ItemPosition)
             {
+                // CarNetId 0 means the world, and position/rotation/direction are world space
+                // less the origin shift. Otherwise they are in that car's local space: a train
+                // moves out from under a world position while the packet is still in flight.
+                writer.Put(CarNetId);
                 Vector3Serializer.Serialize(writer, ItemPosition);
                 QuaternionSerializer.Serialize(writer, ItemRotation);
 
@@ -100,15 +104,13 @@ public class ItemUpdateData
         {
             if (ItemState == ItemState.Dropped || ItemState == ItemState.Thrown) // || UpdateType.HasFlag(ItemUpdateType.ItemPosition)
             {
+                //0 = world space; otherwise everything below is local to this car
+                CarNetId = reader.GetUShort();
                 ItemPosition = Vector3Serializer.Deserialize(reader);
                 ItemRotation = QuaternionSerializer.Deserialize(reader);
 
                 if (ItemState == ItemState.Thrown)
-                {
-                    Multiplayer.LogDebug(() => $"ItemUpdateData.Deserialize() Item Thrown before: {ThrowDirection}");
                     ThrowDirection = Vector3Serializer.Deserialize(reader);
-                    Multiplayer.LogDebug(() => $"ItemUpdateData.Deserialize() Item Thrown after: {ThrowDirection}");
-                }
             }
             else if (ItemState == ItemState.InInventory || ItemState == ItemState.InHand)
             {

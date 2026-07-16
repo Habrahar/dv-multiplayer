@@ -1250,12 +1250,22 @@ public class NetworkClient : NetworkManager
 
     private void OnClientboundJobValidateResponsePacket(ClientboundJobValidateResponsePacket packet)
     {
-        Log($"Job validation response received JobNetId: {packet.JobNetId}, Status: {packet.Invalid}");
+        Log($"Job validation response received JobNetId: {packet.JobNetId}, Invalid: {packet.Invalid}, Reason: {packet.Reason}");
 
         if (!NetworkedJob.Get(packet.JobNetId, out NetworkedJob networkedJob))
             return;
 
-        Object.Destroy(networkedJob.gameObject);
+        // The server has no such job - our copy is junk.
+        if (packet.Invalid)
+        {
+            Object.Destroy(networkedJob.gameObject);
+            return;
+        }
+
+        // Wake the validator instead of leaving it to time out; it prints the reason (B8, B19).
+        networkedJob.RefusalReason = packet.Reason;
+        networkedJob.ValidationAccepted = false;
+        networkedJob.ValidatorResponseReceived = true;
     }
 
     private void OnCommonPitStopInteractionPacket(CommonPitStopInteractionPacket packet)
