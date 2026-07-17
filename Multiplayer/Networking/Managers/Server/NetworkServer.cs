@@ -2069,13 +2069,12 @@ public class NetworkServer : NetworkManager
             return;
         }
 
-        CareerManagerDebtController.Instance.RefreshExistingDebtsState();
-        if (CareerManagerDebtController.Instance.NumberOfNonZeroPricedDebts > 0)
-        {
-            LogWarning($"{player.Username} tried to purchase a {(packet.IsJobLicense ? "job" : "general")} license with id {packet.Id} while having existing debts!");
-            DenyLicensePurchase(packet.TicketId, player, peer, LicensePurchaseResponse.ResponseType.OutstandingDebts);
-            return;
-        }
+        // No debt check here on purpose (B2). Only clients reach this handler; the host buys
+        // through vanilla, which checks the host's own debts locally. The controller here IS the
+        // host's, and debts are not tracked per player - RegisterDebt runs on the host alone, for
+        // the world - so a client can never hold a debt of their own. Judging their purchase by
+        // the host's debts blocked everyone whenever the host owed anything. When debts become
+        // personal, gate on the buyer's own debt here instead.
 
         if (!player.RemoveMoney(price.Value))
         {
