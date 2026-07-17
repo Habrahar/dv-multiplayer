@@ -1,3 +1,4 @@
+using DV.Booklets;
 using DV.ServicePenalty.UI;
 using HarmonyLib;
 using Multiplayer.Components.Networking;
@@ -41,7 +42,11 @@ public static class CareerManagerLicensePayingScreenPatch
 
                 if (purchase.Response == LicensePurchaseResponse.ResponseType.Success)
                 {
-                    // The license and the new balance arrive as their own packets.
+                    // The license and the new balance arrive as their own packets, but the paper
+                    // does not: vanilla prints it here, and skipping this branch took the print
+                    // with it, so a client's licence appeared with no booklet to show for it (B3).
+                    PrintLicense(__instance);
+
                     if (__instance != null)
                         __instance.screenSwitcher.SetActiveDisplay(__instance.licensesScreen);
                     return;
@@ -58,6 +63,29 @@ public static class CareerManagerLicensePayingScreenPatch
 
         NetworkLifecycle.Instance.Client.SendLicensePurchaseRequest(ticket.TicketId, licenseId, isJobLicense);
         return false;
+    }
+
+    /// <summary>
+    /// Prints the licence the way vanilla does at this exact point, minus acquiring it: the
+    /// server already granted that and sent it. The booklet is only paper - it is the server's
+    /// grant that makes the licence real - but without it a purchase produced nothing to hold.
+    /// </summary>
+    private static void PrintLicense(CareerManagerLicensePayingScreen screen)
+    {
+        if (screen == null || screen.licensePrinter == null)
+            return;
+
+        Vector3 position = screen.licensePrinter.spawnAnchor.position;
+        Quaternion rotation = screen.licensePrinter.spawnAnchor.rotation;
+
+        if (screen.IsJobLicense)
+            BookletCreator.CreateLicense(screen.jobLicenseToBuy, position, rotation, WorldMover.OriginShiftParent);
+        else if (screen.IsGeneralLicense)
+            BookletCreator.CreateLicense(screen.generalLicenseToBuy, position, rotation, WorldMover.OriginShiftParent);
+        else
+            return;
+
+        screen.licensePrinter.Print(ignoreCooldown: true);
     }
 
     // The server returns the money it refused to take, so the balance corrects itself. All

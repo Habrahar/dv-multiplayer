@@ -532,6 +532,13 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         if (item.Item.IsEssential() || item.Item.IsGrabbed())
             return false;
 
+        // The sweep is for the world's items, not the player's own. The game marks what belongs
+        // to them - starting gear, and anything bought, like a licence off the terminal printer.
+        // Those are made here and the server has no id for them, so hiding them would make a
+        // licence vanish a second after it printed. A pooled item has this cleared on the way in.
+        if (item.Item.InventorySpecs != null && item.Item.InventorySpecs.BelongsToPlayer)
+            return false;
+
         if (StorageController.Instance.StorageInventory.ContainsItem(item.Item))
             return false;
 
