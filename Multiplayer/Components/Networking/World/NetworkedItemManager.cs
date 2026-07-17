@@ -608,12 +608,6 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         // Id first: anything that reacts to activation must already see a server-owned item,
         // or the suppression sweep could mistake it for a local copy.
         newItem.NetId = snapshot.ItemNetId;
-
-        // A pooled item lost RespawnOnDrop on its way in (SendToCache), but one just built from
-        // a prefab still has it, and it would hide or teleport this item by its own reckoning
-        // without telling the host (B17). The host decides where server items are.
-        newItem.StopGameRespawnHandling();
-
         newItem.gameObject.SetActive(true);
 
         newItem.ReceiveSnapshot(snapshot);
