@@ -7,6 +7,7 @@ using Multiplayer.Components.Networking;
 using Multiplayer.Components.Networking.Jobs;
 using DV.Logic.Job;
 using Multiplayer.Networking.Data;
+using Multiplayer.Networking.Data.Items;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Linq;
@@ -24,6 +25,10 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
     // Guessing "unclaimed means the host's" would also quietly hand them the job of any client
     // who never comes back. A job id names the owner outright, host included.
     private const string JOB_OWNERS_KEY = "JobOwners";
+
+    // The client's belt, per player. Vanilla's own Storage_Inventory key holds the *host's*, so
+    // this needs its own; a client's inventory is not part of the host's save game.
+    private const string INVENTORY_KEY = "Inventory";
 
     protected override void Awake()
     {
@@ -72,7 +77,13 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
             playerData.SetFloat(SaveGameKeys.Player_money, (float)player.Money);
             playerData.SetStringArray(SaveGameKeys.Licenses_General, player.AcquiredGeneralLicenses.ToArray());
             playerData.SetStringArray(SaveGameKeys.Licenses_Jobs, player.AcquiredJobLicenses.ToArray());
-            //store inventory see StorageSerializer.SaveStorage()
+
+            // The belt as the client last reported it. Null means they have not said yet - a
+            // player still loading, most likely - and overwriting what is saved with nothing
+            // would empty their pockets for them (B13).
+            if (player.InventoryItems != null)
+                playerData[INVENTORY_KEY] = JToken.FromObject(player.InventoryItems);
+
             players.SetJObject(player.Guid.ToString(), playerData);
         }
 
@@ -105,6 +116,28 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
     public JObject Server_GetPlayerData(SaveGameData data, Guid guid)
     {
         return data?.GetJObject(ROOT_KEY)?.GetJObject(PLAYERS_KEY)?.GetJObject(guid.ToString());
+    }
+
+    /// <summary>
+    /// The belt this player logged out with, or null if the save has never heard of them - which
+    /// is what tells the caller to hand out a starting kit rather than an empty belt.
+    /// </summary>
+    public static PlayerItemSaveData[] Server_GetPlayerInventory(JObject playerData)
+    {
+        JToken items = playerData?[INVENTORY_KEY];
+
+        if (items == null)
+            return null;
+
+        try
+        {
+            return items.ToObject<PlayerItemSaveData[]>();
+        }
+        catch (Exception ex)
+        {
+            Multiplayer.LogError($"Server_GetPlayerInventory() could not read a saved inventory: {ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>

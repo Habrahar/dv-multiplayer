@@ -3,6 +3,7 @@ using DV.JObjectExtstensions;
 using DV.ThingTypes;
 using DV.ThingTypes.TransitionHelpers;
 using Multiplayer.Components.Networking;
+using Multiplayer.Networking.Data.Items;
 using Multiplayer.Components.Networking.Train;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Components.SaveGame;
@@ -101,6 +102,14 @@ public class ServerPlayer : IDisposable
     public Dictionary<NetworkedItem, uint> KnownItems { get; private set; } = new Dictionary<NetworkedItem, uint>(); //NetworkedItem, last updated tick
     public Dictionary<NetworkedItem, float> NearbyItems { get; private set; } = new Dictionary<NetworkedItem, float>(); //NetworkedItem, time since near the item
     public HashSet<ushort> OwnedItems { get; private set; } = new HashSet<ushort>();
+
+    /// <summary>
+    /// The client's belt as they last reported it. Their game owns the slots, so this is the
+    /// only view the host has of it - and what gets written to the save, so that buying
+    /// something and logging out does not undo the purchase (B13). Named for the items, not
+    /// the belt, so it does not shadow the game's Inventory singleton used just below.
+    /// </summary>
+    public PlayerItemSaveData[] InventoryItems { get; set; }
     public StorageBase Storage { get; set; } = new StorageBase();
 
     private Vector3 _lastWorldPos = Vector3.zero;

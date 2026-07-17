@@ -308,6 +308,12 @@ public class NetworkClient : NetworkManager
         NetworkedItemManager.Instance.CheckInstance();
         Log($"Caching World Items...");
         NetworkedItemManager.Instance.CacheWorldItems();
+
+        // Nothing else ever touches this one, and an auto-create singleton is only born when
+        // something asks for it. Start it here, where the world - and so Inventory.Instance,
+        // which it listens to - is known to exist (B13).
+        Log($"Starting Inventory Watcher...");
+        NetworkedPlayerInventory.Instance.CheckInstance();
         Log($"Initialising Cash Registers...");
         NetworkedCashRegisterWithModules.InitialiseCashRegisters();
         Log($"Initialising Pit Stops...");
@@ -1797,6 +1803,14 @@ public class NetworkClient : NetworkManager
             Id = id,
             IsJobLicense = isJobLicense
         }, DeliveryMethod.ReliableUnordered);
+    }
+
+    public void SendPlayerInventory(PlayerItemSaveData[] items)
+    {
+        SendPacketToServer(new ServerboundPlayerInventoryPacket
+        {
+            Items = items
+        }, DeliveryMethod.ReliableOrdered);
     }
 
     public void SendFastTravelRequest(uint ticketId, string markerName)

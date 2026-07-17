@@ -7,6 +7,34 @@ namespace Multiplayer.Networking.Data.Items;
 
 public struct PlayerItemSaveData
 {
+    /// <summary>
+    /// The same item as the game's own serialiser writes to a save. Fields line up one for one,
+    /// which is the point: this type is that one, made to fit down a wire.
+    /// </summary>
+    public static PlayerItemSaveData FromStorageItemData(StorageItemData item)
+    {
+        return new PlayerItemSaveData
+        {
+            ItemPrefabName = item.itemPrefabName,
+            ItemPositionX = item.itemPositionX,
+            ItemPositionY = item.itemPositionY,
+            ItemPositionZ = item.itemPositionZ,
+            ItemRotationX = item.itemRotationX,
+            ItemRotationY = item.itemRotationY,
+            ItemRotationZ = item.itemRotationZ,
+            ItemRotationW = item.itemRotationW,
+            BelongsToPlayer = item.belongsToPlayer,
+            IsGrabbed = item.isGrabbed,
+            CarGuid = item.carGuid,
+            ContainerId = item.containerId,
+            State = item.state,
+            InventorySlotIndex = item.inventorySlotIndex,
+            ContainerSlotIndex = item.containerSlotIndex,
+            InLockedSlot = item.inLockedSlot,
+            IsDropped = item.isDropped,
+        };
+    }
+
     // Flags for data in the packet
     [Flags]
     private enum DataFlags : byte

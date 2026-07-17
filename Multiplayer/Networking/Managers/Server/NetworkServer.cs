@@ -200,6 +200,7 @@ public class NetworkServer : NetworkManager
         netPacketProcessor.SubscribeReusable<ServerboundPlayerPositionPacket, ITransportPeer>(OnServerboundPlayerPositionPacket);
         netPacketProcessor.SubscribeReusable<ServerboundLicensePurchaseRequestPacket, ITransportPeer>(OnServerboundLicensePurchaseRequestPacket);
         netPacketProcessor.SubscribeReusable<ServerboundFastTravelRequestPacket, ITransportPeer>(OnServerboundFastTravelRequestPacket);
+        netPacketProcessor.SubscribeReusable<ServerboundPlayerInventoryPacket, ITransportPeer>(OnServerboundPlayerInventoryPacket);
         netPacketProcessor.SubscribeReusable<ServerboundPlayerPreferenceUpdatePacket, ITransportPeer>(OnServerboundPlayerPreferenceUpdatePacket);
 
 
@@ -1980,6 +1981,20 @@ public class NetworkServer : NetworkManager
     /// gave the money back (B11). The fare is worked out here, from this player's own position,
     /// exactly as FastTravelController.ExtractFastTravelData does.
     /// </summary>
+    // The client's belt as they last reported it. Nothing to judge here - it is their game's
+    // slots, and we could not read them if we wanted to. We remember it so it can be saved.
+    private void OnServerboundPlayerInventoryPacket(ServerboundPlayerInventoryPacket packet, ITransportPeer peer)
+    {
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+        {
+            LogWarning($"OnServerboundPlayerInventoryPacket() ServerPlayer not found: {peer.Id}");
+            return;
+        }
+
+        player.InventoryItems = packet.Items;
+        LogDebug(() => $"[Diag] Inventory: {player.Username} reports {packet.Items?.Length ?? 0} item(s)");
+    }
+
     private void OnServerboundFastTravelRequestPacket(ServerboundFastTravelRequestPacket packet, ITransportPeer peer)
     {
         if (!TryGetServerPlayer(peer, out ServerPlayer player))

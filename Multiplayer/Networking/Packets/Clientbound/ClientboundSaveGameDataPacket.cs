@@ -79,28 +79,17 @@ public class ClientboundSaveGameDataPacket
             return $"ClientboundSaveGameDataPacket.CreatePacket() UnlockedGen: {{{unlockedGen}}}, PacketGen: {{{packetGen}}},  UnlockedJob: {{{unlockedJob}}}, PacketJob: {{{packetJob}}}";
         });
 
-        List<PlayerItemSaveData> playerItems = [];
-        string[] items = ["shovel", "lighter", "Oiler", "Lantern", "Flashlight", "Hanger", "DuctTape"];
-        string[] states = ["", "", "", "", "{\"Restock\": true,\"Battery_power\": 100}", "", ""];
+        // The belt they logged out with. Null means the save has never seen this player, and
+        // only then do they get the starting kit - handing that out every time was what made a
+        // shop purchase vanish by the next login (B13). The host's own belt is vanilla's to
+        // load, exactly as their wallet and licences are.
+        PlayerItemSaveData[] savedInventory = player.IsHost
+            ? null
+            : NetworkedSaveGameManager.Server_GetPlayerInventory(playerData);
 
-        for (int i = 0; i < items.Length; i++)
-        {
-            JObject state;
+        PlayerItemSaveData[] playerItems = savedInventory ?? StartingInventory();
 
-            if (!string.IsNullOrEmpty(states[i]))
-                state = JObject.Parse(states[i]);
-            else
-                state = [];
-
-            var testItem = new PlayerItemSaveData()
-            {
-                ItemPrefabName = items[i],
-                BelongsToPlayer = true,
-                InventorySlotIndex = 14 + i,
-                State = state
-            };
-            playerItems.Add(testItem);
-        }
+        Multiplayer.Log($"[Diag] Inventory: {player.Username} joins with {(savedInventory != null ? $"their saved belt - {savedInventory.Length} item(s)" : "the starting kit")}");
 
         return new ClientboundSaveGameDataPacket
         {
@@ -126,8 +115,32 @@ public class ClientboundSaveGameDataPacket
 
             JobManagerTime = JobsManager.Instance.Time,
 
-            PlayerItems = playerItems.ToArray()
+            PlayerItems = playerItems
         };
+    }
+
+    /// <summary>
+    /// What a first-time player starts with. This was handed to everyone on every login; it is
+    /// the equivalent of ServerPlayer.StartingGeneralLicenses, and belongs in the same place -
+    /// given once, then theirs to keep or lose.
+    /// </summary>
+    private static PlayerItemSaveData[] StartingInventory()
+    {
+        string[] items = ["shovel", "lighter", "Oiler", "Lantern", "Flashlight", "Hanger", "DuctTape"];
+        string[] states = ["", "", "", "", "{\"Restock\": true,\"Battery_power\": 100}", "", ""];
+
+        PlayerItemSaveData[] kit = new PlayerItemSaveData[items.Length];
+
+        for (int i = 0; i < items.Length; i++)
+            kit[i] = new PlayerItemSaveData
+            {
+                ItemPrefabName = items[i],
+                BelongsToPlayer = true,
+                InventorySlotIndex = 14 + i,
+                State = string.IsNullOrEmpty(states[i]) ? [] : JObject.Parse(states[i])
+            };
+
+        return kit;
     }
 
     public ClientboundSaveGameDataPacket Clone()
