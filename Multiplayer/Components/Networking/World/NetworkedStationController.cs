@@ -4,7 +4,9 @@ using DV.ServicePenalty;
 using DV.ThingTypes;
 using DV.Utils;
 using Multiplayer.Components.Networking.Jobs;
+using Multiplayer.Components.SaveGame;
 using Multiplayer.Components.Networking.Train;
+using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Items;
 using Multiplayer.Networking.Data.Jobs;
 using Multiplayer.Utils;
@@ -275,6 +277,34 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
 
         //Setup handlers
         networkedJob.OnJobDirty += OnJobDirty;
+
+        // A job in progress the moment it appears was restored from the save, not just taken -
+        // vanilla brings back the work but has never heard of an owner. Without this the job
+        // comes back belonging to nobody: unworkable, untakeable, and its booklet loose in the
+        // world for anyone to bin (B9).
+        if (job.State == JobState.InProgress)
+            RestoreJobOwner(networkedJob, job);
+    }
+
+    private void RestoreJobOwner(NetworkedJob networkedJob, Job job)
+    {
+        Guid owner = NetworkedSaveGameManager.Instance.Server_GetJobOwner(job.ID);
+
+        if (owner == Guid.Empty)
+        {
+            Multiplayer.LogWarning($"[Diag] Jobs: {job.ID} came back in progress with no saved owner. It belongs to nobody");
+            return;
+        }
+
+        networkedJob.RestoreOwner(owner);
+
+        // The owner may already be here - the host always is by the time their own world loads.
+        // Anyone still to arrive is seated by NetworkServer as they log in.
+        foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
+            if (networkedJob.ClaimBy(player))
+                return;
+
+        Multiplayer.Log($"[Diag] Jobs: {job.ID} restored for {owner}, who is not here yet. Holding it for them");
     }
 
     private void OnJobDirty(NetworkedJob job)

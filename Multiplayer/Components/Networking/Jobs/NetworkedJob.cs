@@ -19,6 +19,8 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
     private static readonly Dictionary<string, NetworkedJob> jobIdToNetworkedJob = [];
     private static readonly Dictionary<string, Job> jobIdToJob = [];
 
+    public static Dictionary<string, NetworkedJob>.ValueCollection GetAll() => jobIdToNetworkedJob.Values;
+
     public static bool Get(ushort netId, out NetworkedJob obj)
     {
         bool b = Get(netId, out IdMonoBehaviour<ushort, NetworkedJob> rawObj);
@@ -150,6 +152,37 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
     {
         OwnedBy = player.Guid;
         OwnerId = player.PlayerId;
+    }
+
+    /// <summary>
+    /// Names the owner of a job restored from a save, when nobody has connected yet. Only the
+    /// Guid survives a restart - a PlayerId is a seat in one session - so the job waits here
+    /// with a name and no id until that player turns up, and <see cref="ClaimBy"/> seats them.
+    /// </summary>
+    public void RestoreOwner(Guid guid)
+    {
+        OwnedBy = guid;
+        OwnerId = 0;
+    }
+
+    /// <summary>
+    /// Seats the Guid's owner in this session. Covers both ways an owner loses their id: a job
+    /// restored from a save has none yet, and a player who reconnects is issued a new one while
+    /// the job still names their old seat. Returns false when the job is not theirs.
+    /// </summary>
+    public bool ClaimBy(ServerPlayer player)
+    {
+        if (OwnedBy == Guid.Empty || OwnedBy != player.Guid || OwnerId == player.PlayerId)
+            return false;
+
+        OwnerId = player.PlayerId;
+        player.AddTakenJob(NetId);
+
+        //the owner id is what clients read to ask "is this mine?", so it has to reach them
+        MarkStateDirty();
+
+        Multiplayer.Log($"[Diag] Jobs: {Job?.ID} handed back to {player.Username} ({player.TakenJobCount}/{player.AllowedConcurrentJobs} slots)");
+        return true;
     }
 
     public JobValidator JobValidator { get; set; }

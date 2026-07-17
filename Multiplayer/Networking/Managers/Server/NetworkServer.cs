@@ -1195,6 +1195,11 @@ public class NetworkServer : NetworkManager
         serverPlayers.Add(serverPlayer.PlayerId, serverPlayer);
         peerToPlayer.Add(peer, serverPlayer);
 
+        // Jobs restored from the save have been waiting for this player by Guid, since that is
+        // all that survives a restart. Seat them now, before they are told about any jobs, or
+        // their own work would arrive looking like someone else's (B9).
+        ReclaimSavedJobs(serverPlayer);
+
         ClientboundLoginResponsePacket acceptPacket = new()
         {
             Accepted = true,
@@ -1203,6 +1208,19 @@ public class NetworkServer : NetworkManager
         };
 
         SendPacket(peer, acceptPacket, DeliveryMethod.ReliableUnordered);
+    }
+
+    // Hands a returning player back the jobs they were working when the host last shut down.
+    private void ReclaimSavedJobs(ServerPlayer player)
+    {
+        int reclaimed = 0;
+
+        foreach (NetworkedJob job in NetworkedJob.GetAll())
+            if (job != null && job.ClaimBy(player))
+                reclaimed++;
+
+        if (reclaimed > 0)
+            Log($"[Diag] Jobs: handed {reclaimed} saved job(s) back to {player.Username}");
     }
 
     private void OnServerboundLoadStateUpdatePacket(ServerboundLoadStateUpdatePacket packet, ITransportPeer peer)

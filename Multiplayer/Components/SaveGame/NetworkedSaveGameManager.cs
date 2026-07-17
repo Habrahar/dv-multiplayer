@@ -4,6 +4,8 @@ using DV.ThingTypes;
 using DV.Utils;
 using JetBrains.Annotations;
 using Multiplayer.Components.Networking;
+using Multiplayer.Components.Networking.Jobs;
+using DV.Logic.Job;
 using Multiplayer.Networking.Data;
 using Newtonsoft.Json.Linq;
 using System;
@@ -15,6 +17,13 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
 {
     private const string ROOT_KEY = "Multiplayer";
     private const string PLAYERS_KEY = "Players";
+
+    // Job ownership is kept as its own map rather than in each player's data, and deliberately.
+    // The players map excludes the host - their progress belongs to vanilla's save - but a job
+    // the host took is still theirs, and vanilla's save has no idea a job has an owner at all.
+    // Guessing "unclaimed means the host's" would also quietly hand them the job of any client
+    // who never comes back. A job id names the owner outright, host included.
+    private const string JOB_OWNERS_KEY = "JobOwners";
 
     protected override void Awake()
     {
@@ -68,12 +77,48 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
         }
 
         root.SetJObject(PLAYERS_KEY, players);
+        root.SetJObject(JOB_OWNERS_KEY, Server_BuildJobOwners());
         data.SetJObject(ROOT_KEY, root);
+    }
+
+    // Who owns what, by job id: those are stable across restarts, where a NetId is only a
+    // session's handle and a PlayerId only a seat at the table.
+    private static JObject Server_BuildJobOwners()
+    {
+        JObject owners = [];
+
+        foreach (NetworkedJob job in NetworkedJob.GetAll())
+        {
+            if (job == null || job.OwnedBy == Guid.Empty || job.Job == null)
+                continue;
+
+            //only work in progress is worth an owner; finished and abandoned jobs are done with
+            if (job.Job.State != JobState.InProgress)
+                continue;
+
+            owners.SetString(job.Job.ID, job.OwnedBy.ToString());
+        }
+
+        return owners;
     }
 
     public JObject Server_GetPlayerData(SaveGameData data, Guid guid)
     {
         return data?.GetJObject(ROOT_KEY)?.GetJObject(PLAYERS_KEY)?.GetJObject(guid.ToString());
+    }
+
+    /// <summary>
+    /// The owner a job was saved with, or Guid.Empty if it never had one. Called as each job is
+    /// restored, before anyone has connected, so it answers with a Guid rather than a player.
+    /// </summary>
+    public Guid Server_GetJobOwner(string jobId)
+    {
+        string guid = SaveGameManager.Instance?.data?
+            .GetJObject(ROOT_KEY)?
+            .GetJObject(JOB_OWNERS_KEY)?
+            .GetString(jobId);
+
+        return Guid.TryParse(guid, out Guid owner) ? owner : Guid.Empty;
     }
 
     #endregion
