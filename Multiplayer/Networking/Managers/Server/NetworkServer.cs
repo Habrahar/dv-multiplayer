@@ -6,6 +6,7 @@ using DV.InventorySystem;
 using DV.LocoRestoration;
 using DV.Logic.Job;
 using DV.Scenarios.Common;
+using DV.Teleporters;
 using DV.ServicePenalty;
 using DV.ThingTypes;
 using DV.WeatherSystem;
@@ -198,6 +199,7 @@ public class NetworkServer : NetworkManager
         // Player
         netPacketProcessor.SubscribeReusable<ServerboundPlayerPositionPacket, ITransportPeer>(OnServerboundPlayerPositionPacket);
         netPacketProcessor.SubscribeReusable<ServerboundLicensePurchaseRequestPacket, ITransportPeer>(OnServerboundLicensePurchaseRequestPacket);
+        netPacketProcessor.SubscribeReusable<ServerboundFastTravelRequestPacket, ITransportPeer>(OnServerboundFastTravelRequestPacket);
         netPacketProcessor.SubscribeReusable<ServerboundPlayerPreferenceUpdatePacket, ITransportPeer>(OnServerboundPlayerPreferenceUpdatePacket);
 
 
@@ -1970,6 +1972,68 @@ public class NetworkServer : NetworkManager
 
         rpcResponse.Response = SpawnResponse.ResponseType.Success;
         SendRpcResponse(packet.TicketId, rpcResponse, peer);
+    }
+
+    /// <summary>
+    /// Charges a client for a fast travel. Vanilla bills the local Inventory, which on a client
+    /// is a mirror of the wallet kept here - so the trip was free and the next balance packet
+    /// gave the money back (B11). The fare is worked out here, from this player's own position,
+    /// exactly as FastTravelController.ExtractFastTravelData does.
+    /// </summary>
+    private void OnServerboundFastTravelRequestPacket(ServerboundFastTravelRequestPacket packet, ITransportPeer peer)
+    {
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+        {
+            LogWarning($"OnServerboundFastTravelRequestPacket() ServerPlayer not found: {peer.Id}");
+            return;
+        }
+
+        FastTravelDestination marker = FastTravelDestination.ActiveDestinations
+            .FirstOrDefault(d => d != null && d.MarkerName == packet.MarkerName);
+
+        if (marker == null || marker.playerTeleportAnchor == null)
+        {
+            LogWarning($"[Diag] Money: refused {player.Username} fast travel - destination '{packet.MarkerName}' not found here");
+            SendRpcResponse(packet.TicketId, new FastTravelResponse { Response = FastTravelResponse.ResponseType.UnknownDestination }, peer);
+            return;
+        }
+
+        int price = FastTravelPriceFor(player, marker);
+
+        if (!player.RemoveMoney(price))
+        {
+            LogWarning($"[Diag] Money: refused {player.Username} fast travel to '{packet.MarkerName}' - ${price} but they hold ${player.Money}");
+            SendRpcResponse(packet.TicketId, new FastTravelResponse { Response = FastTravelResponse.ResponseType.InsufficientFunds }, peer);
+            return;
+        }
+
+        Log($"[Diag] Money: {player.Username} fast travels to '{packet.MarkerName}' for ${price}, ${player.Money} left");
+
+        SendRpcResponse(packet.TicketId, new FastTravelResponse
+        {
+            Response = FastTravelResponse.ResponseType.Success,
+            Price = price
+        }, peer);
+
+        SendMoney(player);
+    }
+
+    // Mirrors FastTravelController.ExtractFastTravelData: distance in km, times 150, times the
+    // game's modifier. Travel within your own trainset is free there, and stays free here.
+    private static int FastTravelPriceFor(ServerPlayer player, FastTravelDestination marker)
+    {
+        if (marker.playerTeleportAnchor.TryGetComponent(out TrainCar destinationCar)
+            && player.CarId != 0
+            && NetworkedTrainCar.TryGet(player.CarId, out TrainCar playerCar)
+            && playerCar != null
+            && playerCar.trainset == destinationCar.trainset)
+            return 0;
+
+        // Both points are in the same space, so the origin shift cancels out of the distance -
+        // no need to convert either to absolute first.
+        float km = Vector3.Distance(player.WorldPosition, marker.playerTeleportAnchor.position) * 0.001f;
+
+        return Mathf.RoundToInt(km * 150f * Globals.G.GameParams.FastTravelPriceModifier);
     }
 
     private void OnServerboundLicensePurchaseRequestPacket(ServerboundLicensePurchaseRequestPacket packet, ITransportPeer peer)

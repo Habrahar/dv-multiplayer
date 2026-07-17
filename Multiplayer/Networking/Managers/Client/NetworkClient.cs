@@ -1799,6 +1799,15 @@ public class NetworkClient : NetworkManager
         }, DeliveryMethod.ReliableUnordered);
     }
 
+    public void SendFastTravelRequest(uint ticketId, string markerName)
+    {
+        SendPacketToServer(new ServerboundFastTravelRequestPacket
+        {
+            TicketId = ticketId,
+            MarkerName = markerName
+        }, DeliveryMethod.ReliableUnordered);
+    }
+
     public void SendJobValidateRequest(NetworkedJob job, NetworkedStationController station)
     {
         SendPacketToServer(new ServerboundJobValidateRequestPacket
