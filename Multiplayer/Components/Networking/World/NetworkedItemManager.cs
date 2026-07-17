@@ -242,8 +242,15 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 if (currentTime - kvp.Value > NEARBY_REMOVAL_DELAY)
                     staleItems.Add(kvp.Key);
 
+            // Forget it was ever sent, too. Out of range we tell them nothing, so anything that
+            // happens to their copy meanwhile - the game hiding it, respawning it, unloading it -
+            // we neither see nor could correct: KnownItems would still swear they have it, and
+            // they would never be sent it again. Coming back re-announces what is there.
             foreach (var item in staleItems)
+            {
                 player.NearbyItems.Remove(item);
+                player.KnownItems.Remove(item);
+            }
         }
     }
 
@@ -363,6 +370,11 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             else
             {
                 NetworkLifecycle.Instance.Server.LogWarning($"NetworkedItemManager.ProcessReceivedAsHost() Player action validation failed for ItemNetId: {snapshot.ItemNetId}");
+
+                // Refusing in silence leaves them holding an item that, to everyone else, never
+                // left the ground - and nothing would ever tell them otherwise. Dating the item
+                // makes ProcessChanged send them what is actually true, so their copy snaps back.
+                netItem.MarkRelayDirty();
             }
         }
         else
