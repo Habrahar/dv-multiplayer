@@ -418,10 +418,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         // and fall silent the moment it rests. Only the host judges this, and ProcessChanged
         // already limits the traffic to players within MAX_DISTANCE_TO_ITEM.
         //
-        // Never stream a paper (DoNotCreateItem): clients build those themselves and never got a
-        // Create, so a stream would address an item half of them do not have - which spammed one
-        // job overview at a client with thousands of "not found" (B29).
-        bool streaming = settleWatch && settleSeenMoving && !NetworkedItemManager.DoNotCreateItem(TrackedItemType);
+        // The overview and the booklet are carried, thrown and handed over, so they stream like
+        // anything else. Only the throwaway reports - payout, expiry, licence refusal - are left
+        // out: nobody moves those. The real cure for the flood was the kinematic guard above; a
+        // paper resting on the origin shift now settles instead of streaming forever (B29).
+        bool streaming = settleWatch && settleSeenMoving && !NetworkedItemManager.IsThrowawayReport(TrackedItemType);
 
         if (!stateDirty && !hasDirtyVals && !settleSyncDue && !streaming)
             return null;

@@ -780,6 +780,17 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             return false;
     }
 
+    // Papers the machine spits out and the player never carries: a job's payout report, an
+    // expired notice, a licence refusal. They flash into the world once and are read, not moved
+    // - so their position is not worth streaming. The overview and the booklet are different:
+    // those are picked up, thrown and handed over, and should move like anything else.
+    public static bool IsThrowawayReport(Type itemType)
+    {
+        return itemType == typeof(JobReport) ||
+               itemType == typeof(JobExpiredReport) ||
+               itemType == typeof(JobMissingLicenseReport);
+    }
+
     [UsedImplicitly]
     public new static string AllowAutoCreate()
     {
