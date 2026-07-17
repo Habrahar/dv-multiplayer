@@ -98,7 +98,6 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         player.ClearOwnedItems();
         player.KnownItems.Clear();
         player.NearbyItems.Clear();
-        departedItems.Remove(player);
 
         Multiplayer.Log($"[Diag] Items: {player.Username} left, returned {released} carried item(s) to the world.");
     }
@@ -206,10 +205,6 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     //reused each pass; NearbyItems cannot be edited while it is being walked
     private readonly List<NetworkedItem> staleItems = new(64);
 
-    // Items each player has just walked away from, waiting to be told about. Filled by the range
-    // pass, drained by ProcessChanged in the same tick.
-    private readonly Dictionary<ServerPlayer, List<ushort>> departedItems = new();
-
     // Deciding who can see what is O(players x items) - 700-odd items against every player - and
     // it does not need doing 24 times a second. A player crosses the 100 m boundary no faster
     // than a train moves, and NEARBY_REMOVAL_DELAY gives another 3 s of slack on top.
@@ -260,26 +255,19 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 if (currentTime - kvp.Value > NEARBY_REMOVAL_DELAY)
                     staleItems.Add(kvp.Key);
 
-            // Out of range we tell them nothing, so we can neither see nor correct whatever
-            // happens to their copy meanwhile. Rather than leave it there rotting, take it back:
-            // the client pools it, and coming back re-announces what is actually there. Forget
-            // it was ever sent, or KnownItems would swear they still have it and the Create
-            // would never come again (B23).
-            if (staleItems.Count > 0)
+            // Forget it was sent, so coming back re-announces what is actually there - otherwise
+            // KnownItems would swear they still have it and the Create would never come again
+            // (B23). Their copy simply stays put and idle until then.
+            //
+            // We do NOT take the item back with a Destroy. Tried that in 0.1.23.0 and it was too
+            // sharp a tool: leaving range is decided from a player's reported position, and any
+            // hiccup in that - a moment on a car, a frame with stale tracking - despawned the
+            // world and rebuilt it. The logs caught it thrashing 54 items four times over
+            // (B27). A stale idle copy is a far smaller price than that.
+            foreach (var item in staleItems)
             {
-                if (!departedItems.TryGetValue(player, out List<ushort> departed))
-                    departedItems[player] = departed = new List<ushort>();
-
-                foreach (var item in staleItems)
-                {
-                    // Papers are made by the job system on every machine and never got a Create
-                    // from us, so they must never get a Destroy either - the client would pool
-                    // a booklet its own job system is still using.
-                    if (player.KnownItems.Remove(item) && !DoNotCreateItem(item.TrackedItemType))
-                        departed.Add(item.NetId);
-
-                    player.NearbyItems.Remove(item);
-                }
+                player.KnownItems.Remove(item);
+                player.NearbyItems.Remove(item);
             }
         }
     }
@@ -307,22 +295,6 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 continue;
 
             List<ItemUpdateData> playerUpdates = new List<ItemUpdateData>();
-
-            // Take back what they have walked away from, so they stop holding copies we are no
-            // longer telling them about. The client pools these, ready to be handed straight back
-            // when they return.
-            if (departedItems.TryGetValue(player, out List<ushort> departed) && departed.Count > 0)
-            {
-                foreach (ushort netId in departed)
-                    playerUpdates.Add(new ItemUpdateData
-                    {
-                        UpdateType = ItemUpdateData.ItemUpdateType.Destroy,
-                        ItemNetId = netId,
-                    });
-
-                NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) {player.Username} left {departed.Count} item(s) behind");
-                departed.Clear();
-            }
 
             // Process nearby items
             foreach (var nearbyItem in player.NearbyItems.Keys)

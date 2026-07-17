@@ -101,6 +101,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private const float REST_SPIN_SQR = 0.05f;
     private const float STREAM_SNAP_DISTANCE_SQR = 0.25f;  //0.5 m apart: no longer a disagreement
     private const float STREAM_SMOOTHING = 0.35f;
+    private const float STREAM_LEAD = 1f / NetworkLifecycle.TICK_RATE;  //a packet is a tick old
+    private const float STREAM_CATCHUP = 4f;   //close the remaining gap over ~a quarter second
     private bool settleWatch;
     private bool settleSeenMoving;
     private uint settleWatchTick;
@@ -543,26 +545,32 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         Rigidbody rb = Item?.ItemRigidbody;
 
-        // Hand the physics the sender's motion and let it carry the item between packets, so the
-        // stream corrects a simulation that is already going the right way rather than replacing
-        // it. Without this the item is teleported 24 times a second and visibly shivers.
-        if (rb != null && !rb.isKinematic)
+        if (rb == null || rb.isKinematic)
+            return;
+
+        // The position in hand is already a tick old - it is where the sender was when they sent
+        // it - so aim at where that motion has carried it since. Correcting to the stale point
+        // instead drags the item backwards every packet, which is what the shivering was (B25).
+        position += velocity * STREAM_LEAD;
+
+        Vector3 error = position - rb.position;
+
+        // Badly wrong: teleport, and only here. Moving a rigidbody by hand skips the collision
+        // sweep, so doing it every tick punched items through the floor of a moving car (B28).
+        if (error.sqrMagnitude > STREAM_SNAP_DISTANCE_SQR)
         {
+            rb.position = position;
+            rb.rotation = rotation;
             rb.velocity = velocity;
             rb.angularVelocity = spin;
-        }
-
-        // Snap only when the two have genuinely parted company; a small disagreement is what
-        // running two physics engines looks like, and easing it out is invisible.
-        if ((position - transform.position).sqrMagnitude > STREAM_SNAP_DISTANCE_SQR)
-        {
-            transform.position = position;
-            transform.rotation = rotation;
             return;
         }
 
-        transform.position = Vector3.Lerp(transform.position, position, STREAM_SMOOTHING);
-        transform.rotation = Quaternion.Slerp(transform.rotation, rotation, STREAM_SMOOTHING);
+        // Otherwise steer rather than shove: the sender's motion, plus just enough of a nudge to
+        // close the gap. Physics keeps hold of the item, so it still collides with the world.
+        rb.velocity = velocity + error * STREAM_CATCHUP;
+        rb.angularVelocity = spin;
+        rb.rotation = Quaternion.Slerp(rb.rotation, rotation, STREAM_SMOOTHING);
     }
 
     private void ApplySnapshot(ItemUpdateData snapshot)
