@@ -370,8 +370,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     {
         Rigidbody rb = Item.ItemRigidbody;
 
-        //nothing to wait for - it cannot move on its own, so the position already sent stands
-        if (rb == null)
+        // Nothing to wait for: no body, or a kinematic one that physics does not move. A job
+        // paper parented to the origin shift is kinematic and never sleeps, so without this the
+        // watch stayed armed forever and streamed the paper's position every tick (B29).
+        if (rb == null || rb.isKinematic)
         {
             settleWatch = false;
             return;
@@ -415,7 +417,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         // frame is not even inertial. Stream it while it moves, the way players are streamed,
         // and fall silent the moment it rests. Only the host judges this, and ProcessChanged
         // already limits the traffic to players within MAX_DISTANCE_TO_ITEM.
-        bool streaming = settleWatch && settleSeenMoving;
+        //
+        // Never stream a paper (DoNotCreateItem): clients build those themselves and never got a
+        // Create, so a stream would address an item half of them do not have - which spammed one
+        // job overview at a client with thousands of "not found" (B29).
+        bool streaming = settleWatch && settleSeenMoving && !NetworkedItemManager.DoNotCreateItem(TrackedItemType);
 
         if (!stateDirty && !hasDirtyVals && !settleSyncDue && !streaming)
             return null;

@@ -761,7 +761,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     #endregion
 
-    public bool DoNotCreateItem(Type itemType)
+    public static bool DoNotCreateItem(Type itemType)
     {
         if (itemType == null)
             return false;
