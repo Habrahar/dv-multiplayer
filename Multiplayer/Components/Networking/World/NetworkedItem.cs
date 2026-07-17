@@ -193,6 +193,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             Item.Grabbed += OnGrabbed;
             Item.Ungrabbed += OnUngrabbed;
 
+            //B17: the game moves this item behind our back unless we stop it
+            if (NetworkLifecycle.Instance.IsHost())
+                StopGameRespawnHandling();
+
             //Find special interaction components
             TryGetComponent<GrabHandlerItem>(out grabHandler);
             TryGetComponent<SnappableItem>(out snappableItem);
@@ -208,6 +212,26 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             Multiplayer.LogError($"NetworkedItem.Register() Unable to find ItemBase for {name}\r\n{ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Takes RespawnOnDrop off a networked item (B17). It runs its own Checker on every machine
+    /// and acts on that machine's distances, telling nobody: it freezes an item further than
+    /// maxDistance from the local camera, and hides, teleports or destroys one that strayed from
+    /// both its spawn and the local player. On the host - which is authoritative and, unlike a
+    /// client, never pools anything - both are wrong. The freeze is the worse of the two: it is
+    /// judged against the *host's* camera, so an item a client is standing over goes kinematic
+    /// simply because the host is elsewhere, and the host then reports it as resting.
+    ///
+    /// The cost is real and accepted: this is also the game's safety net for an item that falls
+    /// through the world, and without it such an item is lost. A net of our own is worth adding.
+    /// </summary>
+    public void StopGameRespawnHandling()
+    {
+        RespawnOnDrop respawn = GetComponent<RespawnOnDrop>();
+
+        if (respawn != null)
+            Destroy(respawn);
     }
 
     private void OnUngrabbed(ControlImplBase obj)

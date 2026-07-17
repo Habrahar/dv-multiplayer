@@ -98,6 +98,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         player.ClearOwnedItems();
         player.KnownItems.Clear();
         player.NearbyItems.Clear();
+        departedItems.Remove(player);
 
         Multiplayer.Log($"[Diag] Items: {player.Username} left, returned {released} carried item(s) to the world.");
     }
@@ -205,8 +206,23 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     //reused each pass; NearbyItems cannot be edited while it is being walked
     private readonly List<NetworkedItem> staleItems = new(64);
 
+    // Items each player has just walked away from, waiting to be told about. Filled by the range
+    // pass, drained by ProcessChanged in the same tick.
+    private readonly Dictionary<ServerPlayer, List<ushort>> departedItems = new();
+
+    // Deciding who can see what is O(players x items) - 700-odd items against every player - and
+    // it does not need doing 24 times a second. A player crosses the 100 m boundary no faster
+    // than a train moves, and NEARBY_REMOVAL_DELAY gives another 3 s of slack on top.
+    private const float RANGE_SWEEP_PERIOD = 0.25f;
+    private float lastRangeSweep;
+
     private void UpdatePlayerItemLists()
     {
+        if (Time.time - lastRangeSweep < RANGE_SWEEP_PERIOD)
+            return;
+
+        lastRangeSweep = Time.time;
+
         float currentTime = Time.time;
 
         var allItems = NetworkedItem.GetAll();
@@ -216,6 +232,8 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             if (player.LoadingState < PlayerLoadingState.ReadyForItems)
                 continue;
 
+            Vector3 playerPosition = player.WorldPosition;
+
             foreach (var item in allItems)
             {
                 if (item == null)
@@ -224,7 +242,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                     continue;
                 }
 
-                float sqrDistance = (player.WorldPosition - item.transform.position).sqrMagnitude;
+                float sqrDistance = (playerPosition - item.transform.position).sqrMagnitude;
 
                 if (sqrDistance <= MAX_DISTANCE_TO_ITEM_SQR)
                 {
@@ -242,28 +260,43 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 if (currentTime - kvp.Value > NEARBY_REMOVAL_DELAY)
                     staleItems.Add(kvp.Key);
 
-            // Forget it was ever sent, too. Out of range we tell them nothing, so anything that
-            // happens to their copy meanwhile - the game hiding it, respawning it, unloading it -
-            // we neither see nor could correct: KnownItems would still swear they have it, and
-            // they would never be sent it again. Coming back re-announces what is there.
-            foreach (var item in staleItems)
+            // Out of range we tell them nothing, so we can neither see nor correct whatever
+            // happens to their copy meanwhile. Rather than leave it there rotting, take it back:
+            // the client pools it, and coming back re-announces what is actually there. Forget
+            // it was ever sent, or KnownItems would swear they still have it and the Create
+            // would never come again (B23).
+            if (staleItems.Count > 0)
             {
-                player.NearbyItems.Remove(item);
-                player.KnownItems.Remove(item);
+                if (!departedItems.TryGetValue(player, out List<ushort> departed))
+                    departedItems[player] = departed = new List<ushort>();
+
+                foreach (var item in staleItems)
+                {
+                    // Papers are made by the job system on every machine and never got a Create
+                    // from us, so they must never get a Destroy either - the client would pool
+                    // a booklet its own job system is still using.
+                    if (player.KnownItems.Remove(item) && !DoNotCreateItem(item.TrackedItemType))
+                        departed.Add(item.NetId);
+
+                    player.NearbyItems.Remove(item);
+                }
             }
         }
     }
 
+    // Keyed by net id: this is looked up once per nearby item per player, and a linear scan of
+    // everything that changed made that quadratic.
+    private readonly Dictionary<ushort, ItemUpdateData> dirtyItems = new(64);
+
     private void ProcessChanged(uint tick)
     {
-        List<ItemUpdateData> dirtyItems = new List<ItemUpdateData>();
-        float timeStamp = Time.time;
+        dirtyItems.Clear();
 
         foreach (var item in NetworkedItem.GetAll())
         {
             ItemUpdateData snapshot = item.GetSnapshot();
             if (snapshot != null)
-                dirtyItems.Add(snapshot);
+                dirtyItems[snapshot.ItemNetId] = snapshot;
         }
 
         //NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) DirtyItems: {dirtyItems.Count}");
@@ -274,6 +307,22 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 continue;
 
             List<ItemUpdateData> playerUpdates = new List<ItemUpdateData>();
+
+            // Take back what they have walked away from, so they stop holding copies we are no
+            // longer telling them about. The client pools these, ready to be handed straight back
+            // when they return.
+            if (departedItems.TryGetValue(player, out List<ushort> departed) && departed.Count > 0)
+            {
+                foreach (ushort netId in departed)
+                    playerUpdates.Add(new ItemUpdateData
+                    {
+                        UpdateType = ItemUpdateData.ItemUpdateType.Destroy,
+                        ItemNetId = netId,
+                    });
+
+                NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) {player.Username} left {departed.Count} item(s) behind");
+                departed.Clear();
+            }
 
             // Process nearby items
             foreach (var nearbyItem in player.NearbyItems.Keys)
@@ -302,7 +351,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 else
                 {
                     // Check if this item is in the dirty items list
-                    var dirtyUpdate = dirtyItems.FirstOrDefault(di => di.ItemNetId == nearbyItem.NetId);
+                    dirtyItems.TryGetValue(nearbyItem.NetId, out ItemUpdateData dirtyUpdate);
 
                     //NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) Item exists for: {player.Username}, {dirtyUpdate != null}");
 
@@ -580,6 +629,12 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         // Id first: anything that reacts to activation must already see a server-owned item,
         // or the suppression sweep could mistake it for a local copy.
         newItem.NetId = snapshot.ItemNetId;
+
+        // A pooled item lost RespawnOnDrop on its way in (SendToCache), but one just built from
+        // a prefab still has it, and it would hide or teleport this item by its own reckoning
+        // without telling the host (B17). The host decides where server items are.
+        newItem.StopGameRespawnHandling();
+
         newItem.gameObject.SetActive(true);
 
         newItem.ReceiveSnapshot(snapshot);
