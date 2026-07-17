@@ -361,9 +361,10 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
                 newJob.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
 
             // The booklet is only ever printed by a live state change, which joining is not, so
-            // without this the paper never exists here - while the host, which counts it as sent,
-            // keeps addressing snapshots to an item we do not have (B18).
-            if (jobData.ItemNetID != 0)
+            // without this the owner's paper never exists here (B18). Only the owner gets one:
+            // a booklet is the job in physical form, and binning someone else's cancels their
+            // work - the server hides it from everyone else for the same reason (Server_TakeJob).
+            if (mineOnJoin && jobData.ItemNetID != 0)
                 GenerateBooklet(networkedJob, jobData.ItemNetID, jobData.ItemPosition);
         }
         else

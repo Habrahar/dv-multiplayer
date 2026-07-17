@@ -373,17 +373,20 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return;
         }
 
-        bool atRest = IsAtRest(rb);
-        bool timedOut = NetworkLifecycle.Instance.Tick - settleWatchTick >= SETTLE_TIMEOUT_TICKS;
-
-        if (!atRest)
+        // Still moving: keep watching, and let GetSnapshot stream it. No timeout here - an item
+        // that never settles is exactly the one that must keep being told, not given up on.
+        if (!IsAtRest(rb))
+        {
             settleSeenMoving = true;
+            return;
+        }
 
-        //asleep before physics ever took over means the throw has yet to start, not that it ended
-        if (!timedOut && !(atRest && settleSeenMoving))
+        // Asleep before physics ever took over means the throw has yet to start, not that it
+        // ended. Give it a moment before believing it.
+        if (!settleSeenMoving && NetworkLifecycle.Instance.Tick - settleWatchTick < SETTLE_TIMEOUT_TICKS)
             return;
 
-        Multiplayer.LogDebug(() => $"NetworkedItem.CheckSettled() netId: {NetId}, name: {name} came to rest at {transform.position}, sleeping: {atRest}, timed out: {timedOut}");
+        Multiplayer.LogDebug(() => $"NetworkedItem.CheckSettled() netId: {NetId}, name: {name} came to rest at {transform.position}, moved first: {settleSeenMoving}");
 
         settleWatch = false;
         wasThrown = false;  //report where it lies, not where it flew from
@@ -403,7 +406,14 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (settleWatch && (lastState == ItemState.Dropped || lastState == ItemState.Thrown))
             CheckSettled();
 
-        if (!stateDirty && !hasDirtyVals && !settleSyncDue)
+        // Still in motion, so where it is cannot be inferred from anything already sent: every
+        // machine runs its own physics and diverges within a tick, and inside a moving cab the
+        // frame is not even inertial. Stream it while it moves, the way players are streamed,
+        // and fall silent the moment it rests. Only the host judges this, and ProcessChanged
+        // already limits the traffic to players within MAX_DISTANCE_TO_ITEM.
+        bool streaming = settleWatch && settleSeenMoving;
+
+        if (!stateDirty && !hasDirtyVals && !settleSyncDue && !streaming)
             return null;
 
         ItemState currentState = GetItemState();
@@ -423,6 +433,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
                 Multiplayer.LogDebug(GetDirtyValuesDebugString);
                 updateType |= ItemUpdateData.ItemUpdateType.ObjectState;
             }
+
+            //nothing changed - it is simply still moving
+            if (updateType == ItemUpdateData.ItemUpdateType.None && streaming)
+                updateType = ItemUpdateData.ItemUpdateType.ItemPosition;
         }
         else
         {
@@ -458,6 +472,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         if (!registrationComplete)
         {
+            // Motion is only worth anything now: replaying a queued position later would put the
+            // item back where it was seconds ago. The next one is a tick away.
+            if (ItemUpdateData.IsMotionStream(snapshot.UpdateType))
+                return;
+
             Multiplayer.LogDebug(() => $"NetworkedItem.ReceiveSnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}. Queuing");
             pendingSnapshots.Enqueue(snapshot);
 
@@ -471,8 +490,51 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         ApplySnapshot(snapshot);
     }
 
+    // The item is mid-flight or still rolling. Put it where the sender has it and hand its
+    // physics the same motion, so it carries on from there instead of re-running the drop.
+    private void ApplyMotionStream(ItemUpdateData snapshot)
+    {
+        Vector3 position = snapshot.ItemPosition;
+        Quaternion rotation = snapshot.ItemRotation;
+        Vector3 velocity = snapshot.ItemVelocity;
+        Vector3 spin = snapshot.ItemAngularVelocity;
+
+        if (snapshot.CarNetId != 0 && NetworkedTrainCar.TryGet(snapshot.CarNetId, out TrainCar car) && car != null)
+        {
+            position = car.transform.TransformPoint(position);
+            rotation = car.transform.rotation * rotation;
+            velocity = car.transform.TransformDirection(velocity);
+            spin = car.transform.TransformDirection(spin);
+
+            //motion was sent relative to the car, so put the car's own motion back in
+            if (car.rb != null)
+                velocity += car.rb.velocity;
+        }
+        else
+        {
+            position += WorldMover.currentMove;
+        }
+
+        transform.position = position;
+        transform.rotation = rotation;
+
+        Rigidbody rb = Item?.ItemRigidbody;
+
+        if (rb != null && !rb.isKinematic)
+        {
+            rb.velocity = velocity;
+            rb.angularVelocity = spin;
+        }
+    }
+
     private void ApplySnapshot(ItemUpdateData snapshot)
     {
+        if (ItemUpdateData.IsMotionStream(snapshot.UpdateType))
+        {
+            ApplyMotionStream(snapshot);
+            return;
+        }
+
         if (snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.ItemState) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.FullSync) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.Create))
         {
             Multiplayer.LogDebug(() => $"NetworkedItem.ApplySnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}, ItemState: {snapshot?.ItemState}, Active state: {gameObject.activeInHierarchy}");
@@ -525,6 +587,36 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         return;
     }
 
+    // The car an item is riding, or null for the world. The game parents an item to a car's
+    // interior when it lands on one, so this is the game's own answer, not a guess.
+    private TrainCar RestingCar()
+    {
+        TrainCar car = TrainCar.Resolve(transform);
+        return car != null && car.GetNetId() != 0 ? car : null;
+    }
+
+    // Where the item is and how it moves, told in the frame the receiver can still make sense of
+    // once the packet lands: a car's own position is read at apply time, so however far the train
+    // travelled in between, the item goes back to the same spot in the cab (B20).
+    private void FrameMotion(TrainCar car, ref Vector3 position, ref Quaternion rotation, ref Vector3 direction, ref Vector3 velocity, ref Vector3 spin)
+    {
+        if (car == null)
+        {
+            position -= WorldMover.currentMove;
+            return;
+        }
+
+        //motion is relative to the car: an item at rest in a moving cab is not moving at all
+        if (car.rb != null)
+            velocity -= car.rb.velocity;
+
+        position = car.transform.InverseTransformPoint(position);
+        rotation = Quaternion.Inverse(car.transform.rotation) * rotation;
+        direction = car.transform.InverseTransformDirection(direction);
+        velocity = car.transform.InverseTransformDirection(velocity);
+        spin = car.transform.InverseTransformDirection(spin);
+    }
+
     public ItemUpdateData CreateUpdateData(ItemUpdateData.ItemUpdateType updateType)
     {
         if (transform == null || Item == null || Item?.InventorySpecs == null || Item?.InventorySpecs?.ItemPrefabName == null)
@@ -536,9 +628,19 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         Vector3 position;
         Quaternion rotation;
         Vector3 direction = throwDirection;
+        Vector3 velocity = Vector3.zero;
+        Vector3 spin = Vector3.zero;
         Dictionary<string, object> states;
         ushort carId = 0;
         bool frontCoupler = true;
+
+        Rigidbody body = Item.ItemRigidbody;
+
+        if (body != null && !body.isKinematic)
+        {
+            velocity = body.velocity;
+            spin = body.angularVelocity;
+        }
 
         if (wasThrown)
         {
@@ -551,32 +653,27 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             rotation = transform.rotation;
         }
 
-        // An item riding a car has to be described relative to that car. A world position is
-        // already wrong by the time it arrives - the train moved, and the receiver's copy of the
-        // car is interpolating somewhere else again. Players inside a car are tracked this way
-        // already (ServerPlayer.WorldPosition); items were not (B20).
-        if (lastState == ItemState.Dropped || lastState == ItemState.Thrown)
-        {
-            TrainCar restingCar = TrainCar.Resolve(transform);
+        // Anything loose in the world is told relative to the car carrying it, if any.
+        TrainCar restingCar = (lastState == ItemState.Dropped || lastState == ItemState.Thrown)
+            ? RestingCar()
+            : null;
 
-            if (restingCar != null)
+        carId = restingCar?.GetNetId() ?? 0;
+        FrameMotion(restingCar, ref position, ref rotation, ref direction, ref velocity, ref spin);
+
+        // A motion stream says nothing else - no state, no prefab, no tracked values.
+        if (ItemUpdateData.IsMotionStream(updateType))
+        {
+            return new ItemUpdateData
             {
-                carId = restingCar.GetNetId();
-
-                if (carId != 0)
-                {
-                    position = restingCar.transform.InverseTransformPoint(position);
-                    rotation = Quaternion.Inverse(restingCar.transform.rotation) * rotation;
-                    direction = restingCar.transform.InverseTransformDirection(direction);
-                }
-            }
-
-            if (carId == 0)
-                position -= WorldMover.currentMove;
-        }
-        else
-        {
-            position -= WorldMover.currentMove;
+                UpdateType = updateType,
+                ItemNetId = NetId,
+                CarNetId = carId,
+                ItemPosition = position,
+                ItemRotation = rotation,
+                ItemVelocity = velocity,
+                ItemAngularVelocity = spin,
+            };
         }
 
         if (updateType.HasFlag(ItemUpdateData.ItemUpdateType.Create) || updateType.HasFlag(ItemUpdateData.ItemUpdateType.FullSync))

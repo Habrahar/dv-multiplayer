@@ -21,6 +21,16 @@ public class ItemUpdateData
         FullSync = ItemState | ItemPosition | ObjectState,
     }
 
+    /// <summary>
+    /// ItemPosition on its own is a motion stream: the item has not changed state, it is simply
+    /// still moving, and where it is cannot be inferred - physics runs on every machine and
+    /// diverges at once. Announcing a drop is not enough for anything that keeps moving after it.
+    /// </summary>
+    public static bool IsMotionStream(ItemUpdateType type) =>
+        type.HasFlag(ItemUpdateType.ItemPosition)
+        && !type.HasFlag(ItemUpdateType.ItemState)
+        && !type.HasFlag(ItemUpdateType.Create);
+
     public ItemUpdateType UpdateType { get; set; }
     public ushort ItemNetId { get; set; }
     public string PrefabName { get; set; }
@@ -33,6 +43,10 @@ public class ItemUpdateData
     public bool AttachedFront  { get; set; }
     public Dictionary<string, object> States { get; set; }
 
+    /// <summary>Motion streams only: velocity and spin, in the same frame as ItemPosition.</summary>
+    public Vector3 ItemVelocity { get; set; }
+    public Vector3 ItemAngularVelocity { get; set; }
+
     public void Serialize(NetDataWriter writer)
     {
         writer.Put((byte)UpdateType);
@@ -40,6 +54,18 @@ public class ItemUpdateData
 
         if (UpdateType == ItemUpdateType.Destroy)
             return;
+
+        // Motion stream: nothing but where it is and how it is moving. Carrying the state would
+        // make the receiver re-run the drop - or worse, re-throw it - once per tick.
+        if (IsMotionStream(UpdateType))
+        {
+            writer.Put(CarNetId);
+            Vector3Serializer.Serialize(writer, ItemPosition);
+            QuaternionSerializer.Serialize(writer, ItemRotation);
+            Vector3Serializer.Serialize(writer, ItemVelocity);
+            Vector3Serializer.Serialize(writer, ItemAngularVelocity);
+            return;
+        }
 
         writer.Put((byte)ItemState);
 
@@ -94,6 +120,16 @@ public class ItemUpdateData
 
         if (UpdateType == ItemUpdateType.Destroy)
             return;
+
+        if (IsMotionStream(UpdateType))
+        {
+            CarNetId = reader.GetUShort();
+            ItemPosition = Vector3Serializer.Deserialize(reader);
+            ItemRotation = QuaternionSerializer.Deserialize(reader);
+            ItemVelocity = Vector3Serializer.Deserialize(reader);
+            ItemAngularVelocity = Vector3Serializer.Deserialize(reader);
+            return;
+        }
 
         ItemState = (ItemState)reader.GetByte();
 
