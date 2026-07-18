@@ -63,7 +63,7 @@ public class NetworkedPlayerInventory : SingletonBehaviour<NetworkedPlayerInvent
         if (!dirty || Time.time - lastSent < SEND_PERIOD)
             return;
 
-        if (NetworkLifecycle.Instance.Client?.LoadingState != PlayerLoadingState.Complete)
+        if (NetworkLifecycle.Instance.Client == null || NetworkLifecycle.Instance.Client.LoadingState != PlayerLoadingState.Complete)
             return;
 
         dirty = false;
