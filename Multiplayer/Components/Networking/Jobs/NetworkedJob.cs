@@ -172,16 +172,21 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
     /// </summary>
     public bool ClaimBy(ServerPlayer player)
     {
-        if (OwnedBy == Guid.Empty || OwnedBy != player.Guid || OwnerId == player.PlayerId)
+        if (OwnedBy == Guid.Empty || OwnedBy != player.Guid)
             return false;
 
+        // Player ids are recycled after a disconnect. A returning player can therefore get
+        // their old id back, but they are still a new ServerPlayer with an empty slot list.
+        // Re-add the job in that case as well; otherwise they can take an extra job after a
+        // reconnect despite already owning one.
+        bool wasAlreadySeated = OwnerId == player.PlayerId;
         OwnerId = player.PlayerId;
         player.AddTakenJob(NetId);
 
         //the owner id is what clients read to ask "is this mine?", so it has to reach them
         MarkStateDirty();
 
-        Multiplayer.Log($"[Diag] Jobs: {Job?.ID} handed back to {player.Username} ({player.TakenJobCount}/{player.AllowedConcurrentJobs} slots)");
+        Multiplayer.Log($"[Diag] Jobs: {Job?.ID} handed back to {player.Username} ({player.TakenJobCount}/{player.AllowedConcurrentJobs} slots, {(wasAlreadySeated ? "reused player id" : "new player id")})");
         return true;
     }
 

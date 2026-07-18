@@ -1131,6 +1131,24 @@ public class NetworkServer : NetworkManager
             return;
         }
 
+        // The regular compatibility check deliberately permits a version mismatch for
+        // mods marked as MultiplayerCompatibility.All. That is unsafe for this mod itself:
+        // its packets change together with the code. Direct-IP connections bypass the
+        // browser's version warning, so reject the mismatch here instead of letting the
+        // client silently deserialize a different protocol (for example job owners as 0).
+        ModInfo clientMultiplayer = packet.Mods?.FirstOrDefault(mod => mod.Id == "Multiplayer") ?? default;
+        if (clientMultiplayer.Id != "Multiplayer" || clientMultiplayer.Version != Multiplayer.Ver)
+        {
+            LogWarning($"Denied login to incorrect Multiplayer version! Got: {clientMultiplayer.Version ?? "missing"}, expected: {Multiplayer.Ver}");
+            ClientboundLoginResponsePacket denyPacket = new()
+            {
+                ReasonKey = Locale.DISCONN_REASON__MODS_KEY,
+                Missing = [new ModInfo("Multiplayer", Multiplayer.Ver, Multiplayer.ModEntry.Info.HomePage)]
+            };
+            request.Reject(WritePacket(denyPacket));
+            return;
+        }
+
         if (PlayerCount >= Multiplayer.Settings.MaxPlayers || IsSinglePlayer && PlayerCount >= 1)
         {
             LogWarning("Denied login due to server being full!");

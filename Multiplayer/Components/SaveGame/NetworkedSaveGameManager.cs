@@ -110,6 +110,7 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
             owners.SetString(job.Job.ID, job.OwnedBy.ToString());
         }
 
+        Multiplayer.LogDebug(() => $"[Diag] Jobs: saving {owners.Count} owner(s): {string.Join(", ", owners.Properties().Select(p => p.Name))}");
         return owners;
     }
 
