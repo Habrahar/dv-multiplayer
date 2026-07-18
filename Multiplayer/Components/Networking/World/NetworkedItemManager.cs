@@ -106,6 +106,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     {
         NetworkLifecycle.Instance.OnTick += Common_OnTick;
 
+        //Clear any dead lookup rows a previous game left in the static dictionary (B32)
+        NetworkedItem.PurgeDeadEntries();
+
         BuildPrefabLookup();
     }
 

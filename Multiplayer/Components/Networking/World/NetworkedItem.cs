@@ -30,7 +30,26 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private static readonly Dictionary<ItemBase, NetworkedItem> itemBaseToNetworkedItem = new(4096);
 
     public static Dictionary<ItemBase, NetworkedItem>.ValueCollection GetAll() => itemBaseToNetworkedItem.Values;
-    
+
+    // Belt-and-braces for B32: drop any entry whose key or value the engine has destroyed. Called
+    // when a session starts, so dead rows a previous game leaked cannot pile up across loads.
+    public static void PurgeDeadEntries()
+    {
+        List<ItemBase> dead = null;
+
+        foreach (var kvp in itemBaseToNetworkedItem)
+            if (kvp.Key == null || kvp.Value == null)
+                (dead ??= new List<ItemBase>()).Add(kvp.Key);
+
+        if (dead == null)
+            return;
+
+        foreach (var key in dead)
+            itemBaseToNetworkedItem.Remove(key);
+
+        Multiplayer.Log($"[Diag] Items: purged {dead.Count} dead lookup entr(y/ies) left over from a previous game.");
+    }
+
     public static bool Get(ushort netId, out NetworkedItem obj)
     {
         bool b = Get(netId, out IdMonoBehaviour<ushort, NetworkedItem> rawObj);
@@ -948,8 +967,20 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     protected override void OnDestroy()
     {
+        // Drop the dictionary entry FIRST, and always - even while unloading, and even after
+        // Unity has zeroed the component. The dictionary is static and outlives the scene, so a
+        // skipped removal leaks a dead entry into the next game; GetAll() then walks it every
+        // tick, per player, and the game freezes worse the longer it runs - a full restart clears
+        // the statics, a new game does not (B32). ReferenceEquals bypasses Unity's fake null: the
+        // managed reference is still a valid dictionary key even when the object reads as null.
+        if (!ReferenceEquals(Item, null))
+            itemBaseToNetworkedItem.Remove(Item);
+
         if (UnloadWatcher.isQuitting || UnloadWatcher.isUnloading)
+        {
+            base.OnDestroy();
             return;
+        }
 
         if (NetworkLifecycle.Instance.IsHost())
         {
@@ -958,19 +989,14 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
                 NetworkedItemManager.Instance.AddDirtyItemSnapshot(this, updateData);
         }
 
+        //Unity-alive check: only unhook events on a component that still exists
         if (Item != null)
         {
             Item.Grabbed -= OnGrabbed;
             Item.Ungrabbed -= OnUngrabbed;
-            itemBaseToNetworkedItem.Remove(Item);
-        }
-        else
-        {
-            Multiplayer.LogWarning($"NetworkedItem.OnDestroy({name}, {NetId}) Item is null!");
         }
 
         base.OnDestroy();
-
     }
 
     public string GetDirtyValuesDebugString()
