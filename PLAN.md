@@ -1051,7 +1051,14 @@ Rejected`. `JobBooklet` у клиента так и не появлялся (в 
 (`ClientboundJobsUpdatePacket.FromNetworkedJobs`), получал null → `ValidationStationId = 0`.
 **Фикс (0.1.26.2):** `netJob.JobValidator = netStation.JobValidator` перед `MarkStateDirty`.
 
-**Осталась вторая часть — «хост видит чужой джоб» (косметика).** `JobsManager.currentJobs` —
+**Вторая часть — кнопка «выдать активные задания» — закрыта в 0.1.26.3.** Кнопка reprint
+(`JobValidator.SummonAllActiveJobBooklets`) перепечатывает **все** бланки в игре
+(`JobBooklet.allExistingJobBooklets`), а хост держит скрытый бланк на каждый клиентский джоб —
+поэтому хосту вылетали все чужие. Патч `JobValidatorReprintPatch` в мультиплеере печатает
+только бланки, чей `NetworkedJob.OwnerId == Client.PlayerId` (свои), — воспроизводит ванильную
+корутину с фильтром. Одиночная игра идёт ванильным путём.
+
+**Остаётся только HUD/журнал — чистая косметика.** `JobsManager.currentJobs` —
 это и список симуляции (его тикает `Update`, `CompleteTheJob` бросает для джоба не из него), и
 журнал игрока в UI, один и тот же. Хост обязан держать клиентский джоб в `currentJobs`, чтобы
 тикать задачи, — и поэтому видит его в своём журнале. Механику это не ломает (владелец —
