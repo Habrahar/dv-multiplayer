@@ -2208,6 +2208,13 @@ public class NetworkServer : NetworkManager
         netJob.SetOwner(player);
         player.AddTakenJob(netJob.NetId);
 
+        // Name the validator this was taken at. The update packet reads the station back out of
+        // it, and when the host takes a job its own ProcessJobOverview sets this - but a client's
+        // take runs here and never did, so the owner received station id 0 and could not print
+        // their booklet: "Validator not found" (B33). Set it before marking dirty, or the packet
+        // goes out without it.
+        netJob.JobValidator = netStation.JobValidator;
+
         // The host's JobsManager holds every job regardless of owner: its Update is what ticks
         // their tasks, and CompleteTheJob throws for anything it does not hold. Taking it as if
         // loaded from a save keeps the host's debt controller out of someone else's job - and
